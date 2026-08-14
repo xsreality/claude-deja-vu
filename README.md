@@ -27,7 +27,7 @@ If you run Claude Code across many terminals and repos, related discussions end 
 ## Getting started
 
 ```bash
-git clone https://github.com/<your-username>/claude-deja-vu.git
+git clone https://github.com/xsreality/claude-deja-vu.git
 cd claude-deja-vu
 python3 dashboard.py
 ```
