@@ -53,6 +53,24 @@ def _text_of(content):
     return ""
 
 
+def _files_of(content):
+    """Absolute paths this message's tool calls touched (Read/Write/Edit/...)."""
+    if not isinstance(content, list):
+        return []
+    out = []
+    for b in content:
+        if not isinstance(b, dict) or b.get("type") != "tool_use":
+            continue
+        inp = b.get("input")
+        if not isinstance(inp, dict):
+            continue
+        # ponytail: every file-touching tool names its target *_path; no per-tool table
+        for k, v in inp.items():
+            if k.endswith("_path") and isinstance(v, str) and v:
+                out.append(v)
+    return out
+
+
 def _epoch(ts):
     """ISO-8601 (e.g. 2026-08-13T19:24:15.365Z) -> epoch seconds, or None."""
     if not isinstance(ts, str):
@@ -85,6 +103,7 @@ def parse_session(path):
     last_ts = None
     msg_count = 0
     blob_parts = []
+    files = set()
 
     try:
         f = open(path, "r", encoding="utf-8", errors="replace")
@@ -106,6 +125,7 @@ def parse_session(path):
             text = _text_of(msg.get("content"))
             if text:
                 blob_parts.append(text)
+            files.update(_files_of(msg.get("content")))
             if o.get("cwd"):
                 cwd = o["cwd"]
             if o.get("gitBranch"):
@@ -133,6 +153,7 @@ def parse_session(path):
         "last": last_ts,
         "count": msg_count,
         "blob": "\n".join(blob_parts),
+        "files": sorted(files),
     }
 
 
@@ -315,14 +336,40 @@ def _snippet(blob, term, width=160):
     return pre + blob[start:end].replace("\n", " ").strip() + post
 
 
-def session_view(s, term=None):
-    v = {
+FILE_PREFIX = "file:"
+MAX_COMPLETIONS = 20
+
+
+def file_term(q):
+    """The path fragment of a `file:` query, or None for an ordinary search."""
+    if q and q.lower().startswith(FILE_PREFIX):
+        return q[len(FILE_PREFIX):].strip()
+    return None
+
+
+def matching_files(s, term):
+    return [f for f in s.get("files", ()) if term.lower() in f.lower()]
+
+
+def complete_files(sessions, term):
+    """Paths to offer as autocomplete: closest match to the fragment first."""
+    hits = {f for s in sessions for f in matching_files(s, term)}
+    # basename matches beat directory matches; shorter paths beat deeper ones
+    return sorted(hits, key=lambda f: (term.lower() not in os.path.basename(f).lower(),
+                                       len(f), f))[:MAX_COMPLETIONS]
+
+
+def session_view(s, term=None, fterm=None):
+    if fterm is None:
+        snippet = _snippet(s["blob"], term) if term else None
+    else:
+        snippet = " · ".join(matching_files(s, fterm)[:3]) or None
+    return {
         "id": s["id"], "title": s["title"], "project": s["project"],
         "branch": s.get("branch"), "last": s["last"], "count": s["count"],
         "summary": s.get("summary"), "clusters": s.get("clusters", []),
-        "snippet": _snippet(s["blob"], term) if term else None,
+        "snippet": snippet,
     }
-    return v
 
 
 def api_sessions(q, scope):
@@ -331,14 +378,18 @@ def api_sessions(q, scope):
     window = SCOPES.get(scope, WINDOW_SECONDS)
     cutoff = time.time() - window
     sessions = [s for s in sessions if s["last"] >= cutoff]
-    if q:
+    fterm = file_term(q)
+    if fterm is not None:
+        sessions = [s for s in sessions if matching_files(s, fterm)]
+    elif q:
         ql = q.lower()
         sessions = [s for s in sessions if ql in s["blob"].lower()]
     clusters = sorted({c for s in sessions for c in s.get("clusters", []) if c})
     return {
-        "sessions": [session_view(s, q or None) for s in sessions],
+        "sessions": [session_view(s, q or None, fterm) for s in sessions],
         "clusters": clusters,
         "analyzed": bool(load_insights()),
+        "files": complete_files(sessions, fterm) if fterm is not None else [],
     }
 
 
@@ -350,6 +401,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")  # edits to this file show on reload
         self.end_headers()
         self.wfile.write(data)
 
@@ -413,10 +465,22 @@ header{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
   padding:11px 18px;background:var(--pane);border-bottom:1px solid var(--line)}
 .mark{font:700 15px/1 var(--sans);letter-spacing:-.01em;white-space:nowrap}
 .mark span{color:var(--accent)}
-#q{flex:1;min-width:200px;font:14px/1 var(--sans);color:var(--ink);background:var(--bg);
+.qwrap{flex:1;min-width:200px;position:relative;display:flex}
+#q{flex:1;min-width:0;font:14px/1 var(--sans);color:var(--ink);background:var(--bg);
   border:1px solid var(--line);border-radius:6px;padding:8px 11px}
 #q::placeholder{color:var(--faded)}
 #q:focus{outline:0;border-color:var(--accent)}
+/* file: autocomplete — a datalist can't match options against a prefixed query */
+#ac{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;display:none;
+  background:var(--pane);border:1px solid var(--line);border-radius:8px;
+  max-height:300px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.13)}
+#ac.on{display:block}
+#ac div{display:flex;gap:9px;align-items:baseline;padding:7px 12px;cursor:pointer;
+  font:12.5px/1.4 var(--mono)}
+#ac div.sel,#ac div:hover{background:var(--sel)}
+#ac .base{white-space:nowrap}
+#ac .dir{color:var(--faded);font-size:11.5px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .scope{display:inline-flex;background:var(--bg);border:1px solid var(--line);
   border-radius:6px;padding:2px}
 .scope button{font:600 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;
@@ -481,10 +545,11 @@ mark{background:var(--accent-soft);color:var(--accent);font-weight:700;padding:0
 .dtop-text{min-width:0}
 .dtop h2{font:600 17px/1.35 var(--sans);margin:4px 0 0;max-width:900px;
   display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
-#d-close{flex:none;font:600 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
+.dtop-btns{flex:none;display:flex;gap:8px}
+#d-close,#d-resume{font:600 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
   background:0;color:var(--faded);cursor:pointer;padding:7px 10px;white-space:nowrap;
   border:1px solid var(--line);border-radius:6px}
-#d-close:hover{color:var(--accent);border-color:var(--accent)}
+#d-close:hover,#d-resume:hover{color:var(--accent);border-color:var(--accent)}
 #thread{overflow-y:auto;flex:1;padding:0 26px 40px}
 .msg{padding:17px 0;border-bottom:1px solid var(--line);max-width:900px}
 .msg:last-child{border-bottom:0}
@@ -525,7 +590,13 @@ mark{background:var(--accent-soft);color:var(--accent);font-weight:700;padding:0
 </style></head><body>
 <header>
   <span class="mark">Claude <span>Déjà Vu</span></span>
-  <input id="q" placeholder="Search every conversation…" aria-label="Search conversations">
+  <div class="qwrap">
+    <input id="q" autocomplete="off" role="combobox" aria-expanded="false"
+      aria-controls="ac" aria-autocomplete="list"
+      placeholder="Search every conversation… or file: to search by path"
+      aria-label="Search conversations">
+    <div id="ac" role="listbox" aria-label="Matching files"></div>
+  </div>
   <div class="scope" role="group" aria-label="Time range">
     <button data-scope="48h" class="on">48h</button>
     <button data-scope="7d">7 days</button>
@@ -545,7 +616,11 @@ mark{background:var(--accent-soft);color:var(--accent);font-weight:700;padding:0
       <div class="dtop-text">
         <div class="eyebrow" id="d-proj"></div><h2 id="d-title"></h2>
       </div>
-      <button id="d-close" title="Close (Esc)" aria-label="Close conversation">Close ✕</button>
+      <div class="dtop-btns">
+        <button id="d-resume" title="Copy the command that reopens this conversation"
+          aria-label="Copy resume command">Resume ▶</button>
+        <button id="d-close" title="Close (Esc)" aria-label="Close conversation">Close ✕</button>
+      </div>
     </div>
     <div id="thread"><div class="hint">Select a conversation to read it here.</div></div>
   </div>
@@ -564,6 +639,42 @@ function highlight(s,q){s=s||'';if(!q)return esc(s);
     out+=esc(s.slice(i,j))+'<mark>'+esc(s.slice(j,j+q.length))+'</mark>';i=j+q.length}
   return out+esc(s.slice(i))}
 function qval(){return document.getElementById('q').value.trim()}
+// `file:<path>` searches paths, not prose — highlight the path, not the prefix.
+function hterm(){const q=qval();
+  return /^file:/i.test(q)?q.slice(5).trim():q}
+// Path completions for a `file:` query. Rebuilt on every load; the server ranks them.
+let ACSEL=-1,ACOFF=false;  // ACOFF: the reload after a pick must not reopen the list
+function acHide(){const ac=document.getElementById('ac');ac.classList.remove('on');
+  ACSEL=-1;document.getElementById('q').setAttribute('aria-expanded','false')}
+function acPick(path){const q=document.getElementById('q');
+  q.value='file:'+path;ACOFF=true;acHide();load()}
+function renderFiles(){
+  const ac=document.getElementById('ac'),fs=DATA.files||[];
+  if(ACOFF){ACOFF=false;return acHide()}
+  if(!fs.length||document.activeElement!==document.getElementById('q'))return acHide();
+  ACSEL=-1;
+  ac.innerHTML=fs.map((f,i)=>{const cut=f.lastIndexOf('/');
+    return '<div role=option data-i="'+i+'"><span class=base>'
+      +highlight(f.slice(cut+1),hterm())+'</span><span class=dir>'
+      +esc(f.slice(0,cut))+'</span></div>'}).join('');
+  ac.classList.add('on');
+  document.getElementById('q').setAttribute('aria-expanded','true')}
+function acMove(d){const ac=document.getElementById('ac');
+  const items=[...ac.children];if(!items.length||!ac.classList.contains('on'))return;
+  ACSEL=(ACSEL+d+items.length)%items.length;
+  items.forEach((el,i)=>el.classList.toggle('sel',i===ACSEL));
+  items[ACSEL].scrollIntoView({block:'nearest'})}
+document.getElementById('ac').addEventListener('mousedown',e=>{
+  const el=e.target.closest('[data-i]');if(!el)return;
+  e.preventDefault();acPick((DATA.files||[])[+el.dataset.i])});
+document.getElementById('q').addEventListener('keydown',e=>{
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();acMove(e.key==='ArrowDown'?1:-1);return}
+  if(e.key==='Enter'&&ACSEL>=0){e.preventDefault();acPick((DATA.files||[])[ACSEL]);return}
+  // Escape closes the dropdown first; only a second press reaches the transcript.
+  if(e.key==='Escape'&&document.getElementById('ac').classList.contains('on')){
+    e.stopPropagation();acHide()}});
+document.getElementById('q').addEventListener('blur',acHide);
 // --- minimal markdown -> html (no library; messages are mostly markdown) ---
 function mdInline(s){s=esc(s);
   s=s.replace(/`([^`]+)`/g,(m,c)=>'<code>'+c+'</code>');
@@ -626,7 +737,7 @@ function syncURL(){const p=new URLSearchParams(),q=qval();
     +(SELECTED?'#'+encodeURIComponent(SELECTED):''))}
 async function load(){
   const r=await fetch('/api/sessions?q='+encodeURIComponent(qval())+'&scope='+SCOPE);
-  DATA=await r.json();render();renderChips();syncURL();
+  DATA=await r.json();render();renderChips();renderFiles();syncURL();
   // #<session-id> opens that conversation directly, so a link to one can be bookmarked.
   const h=decodeURIComponent(location.hash.slice(1));
   if(h&&h!==SELECTED)openDetail(h)}
@@ -649,7 +760,7 @@ function renderChips(){const el=document.getElementById('chips');el.innerHTML=''
 function visible(){let ss=DATA.sessions||[];
   return CLUSTER?ss.filter(s=>(s.clusters||[]).includes(CLUSTER)):ss}
 function render(){
-  const q=qval(),ss=visible();
+  const q=qval(),ht=hterm(),ss=visible();
   const list=document.getElementById('list'),cnt=document.getElementById('count');
   if(!ss.length){cnt.textContent='no matches';
     list.innerHTML='<div class=empty>'+(q?'Nothing found for “'+esc(q)+'”.'
@@ -659,7 +770,7 @@ function render(){
   list.innerHTML=ss.map(s=>{
     const recent=(now-s.last)<48*3600;
     const tags=(s.clusters||[]).map(c=>'<span class=tag>'+esc(c)+'</span>').join('');
-    const snip=s.snippet?'<div class=snippet>'+highlight(s.snippet,q)+'</div>':'';
+    const snip=s.snippet?'<div class=snippet>'+highlight(s.snippet,ht)+'</div>':'';
     const sum=s.summary?'<div class=summary>'+esc(s.summary)+'</div>':'';
     return '<div class="row'+(recent?' recent':'')+(s.id===SELECTED?' on':'')
       +'" data-id="'+esc(s.id)+'" tabindex=0>'
@@ -675,7 +786,7 @@ function closeDetail(){SELECTED=null;syncURL();
 async function openDetail(id){
   SELECTED=id;syncURL();
   document.querySelectorAll('.row').forEach(r=>r.classList.toggle('on',r.dataset.id===id));
-  const q=qval(),thread=document.getElementById('thread');
+  const q=hterm(),thread=document.getElementById('thread');
   thread.innerHTML='<div class=hint>Loading…</div>';
   let d;try{const r=await fetch('/api/session?id='+encodeURIComponent(id));
     if(!r.ok)throw 0;d=await r.json()}catch(e){
@@ -683,6 +794,7 @@ async function openDetail(id){
   document.getElementById('dtop').style.display='';
   document.getElementById('d-proj').textContent=proj(d.project||'');
   document.getElementById('d-title').textContent=d.title||'(untitled session)';
+  setResume(d.project,id);
   thread.innerHTML=(d.messages||[]).map(m=>
     '<div class="msg '+(m.role==='user'?'user':'asst')+'">'
     +'<div class=who>'+(m.role==='user'?'You':'Claude')+'</div>'
@@ -693,6 +805,18 @@ async function openDetail(id){
   const mk=thread.querySelector('mark');
   if(mk)mk.scrollIntoView({block:'center'});  // seek to first match
 }
+// Resume command: single-quote the cwd so paths with spaces survive the shell.
+let RESUME='';
+function setResume(cwd,id){
+  const b=document.getElementById('d-resume');
+  RESUME=(cwd&&cwd!=='(unknown)')
+    ?"cd '"+cwd.replace(/'/g,"'\\\\''")+"' && claude --resume "+id:'';
+  b.style.display=RESUME?'':'none';b.textContent='Resume \\u25b6'}
+document.getElementById('d-resume').addEventListener('click',async()=>{
+  const b=document.getElementById('d-resume');
+  try{await navigator.clipboard.writeText(RESUME);b.textContent='Copied \\u2713'}
+  catch(e){b.textContent='Copy failed'}
+  setTimeout(()=>{if(RESUME)b.textContent='Resume \\u25b6'},1600)});
 function toggleDetail(id){id===SELECTED?closeDetail():openDetail(id)}
 document.getElementById('list').addEventListener('click',e=>{
   const r=e.target.closest('.row');if(r&&r.dataset.id)toggleDetail(r.dataset.id)});
@@ -738,6 +862,14 @@ def _selftest():
         {"type": "assistant",
          "message": {"role": "assistant", "content": [{"type": "text", "text": "hello kafka"}]},
          "timestamp": "2026-08-10T11:00:00.000Z", "cwd": "/repo/a", "gitBranch": "main"},
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "name": "Edit",
+             "input": {"file_path": "/repo/a/src/main.py", "old_string": "x"}},
+            {"type": "tool_use", "name": "Read", "input": {"file_path": "/repo/a/src/main.py"}},
+            {"type": "tool_use", "name": "NotebookEdit",
+             "input": {"notebook_path": "/repo/a/notes.ipynb"}},
+            {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
+        ]}, "timestamp": "2026-08-10T11:00:10.000Z"},
     ]
     with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
         for o in lines:
@@ -747,11 +879,24 @@ def _selftest():
     s = parse_session(path)
     os.unlink(path)
     assert s["title"] == "My Title", s["title"]
-    assert s["count"] == 3, s["count"]  # 2 user + 1 assistant; malformed skipped
+    assert s["count"] == 4, s["count"]  # 2 user + 2 assistant; malformed skipped
     assert s["project"] == "/repo/a" and s["branch"] == "main"
     assert abs(s["first"] - _epoch("2026-08-10T10:00:00.000Z")) < 1
-    assert abs(s["last"] - _epoch("2026-08-10T11:00:00.000Z")) < 1
+    assert abs(s["last"] - _epoch("2026-08-10T11:00:10.000Z")) < 1
     assert "kafka" in s["blob"]
+
+    # file index: any *_path input of a tool_use, deduped and sorted
+    assert s["files"] == ["/repo/a/notes.ipynb", "/repo/a/src/main.py"], s["files"]
+
+    # file: queries filter on paths, and rank basename matches first
+    assert file_term("file: src/main.py") == "src/main.py"
+    assert file_term("main.py") is None and file_term("") is None
+    assert matching_files(s, "MAIN.PY") == ["/repo/a/src/main.py"]  # case-insensitive
+    ranked = complete_files([{"files": ["/x/main.py", "/main.py/deep/other.py", "/y/main.py"]}],
+                            "main.py")
+    assert ranked[:2] == ["/x/main.py", "/y/main.py"], ranked  # basename matches first
+    assert ranked[-1] == "/main.py/deep/other.py", ranked  # only a directory matched
+    assert session_view(s, "file:main", "main")["snippet"] == "/repo/a/src/main.py"
 
     # title fallback when no custom-title
     s2 = dict(s); s2["blob"] = "alpha beta gamma delta"

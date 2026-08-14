@@ -2,7 +2,7 @@
 
 Find that conversation you had with Claude Code — the one you can't remember which project it was in.
 
-If you run Claude Code across many terminals and repos, related discussions end up scattered. Claude Déjà Vu reads the session logs Claude Code already writes to `~/.claude/projects/` and gives you one searchable view of them: browse recent conversations, search every message across every project, read the full transcript, and optionally let Claude group related conversations into topics that span repos.
+If you run Claude Code across many terminals and repos, related discussions end up scattered. Claude Déjà Vu reads the session logs Claude Code already writes to `~/.claude/projects/` and gives you one searchable view of them: browse recent conversations, search every message across every project, find the conversation that touched a given file, read the full transcript, and optionally let Claude group related conversations into topics that span repos.
 
 ![The dashboard: conversation list on the left, full transcript on the right](docs/screenshot.png)
 
@@ -12,8 +12,10 @@ If you run Claude Code across many terminals and repos, related discussions end 
 
 - **See what you've been working on.** Conversations from the last 4 weeks, newest first, with the project, git branch, age, and message count.
 - **Search everything.** One box searches the full text of every message in every conversation. Results show a snippet with the match in context, so you can tell which conversation is the one you want.
+- **Find the conversation that touched a file.** Type `file:` and a path fragment. Completions appear as you type, and the results are the conversations where Claude read or edited that file.
 - **Jump straight to the match.** Open a search result and the transcript scrolls to the first hit, with every occurrence highlighted.
 - **Read comfortably.** Transcripts render markdown — headings, lists, tables, and code blocks — instead of a wall of raw text.
+- **Resume where you left off.** One click copies the `cd … && claude --resume …` command for the conversation you're reading.
 - **Group related work (optional).** *Cross-reference* asks Claude to read your recent conversations and group them into topics. Topics span projects, so "auth migration" can pull together conversations from three different repos. Each conversation also gets a one-line summary of what it was actually about.
 
 ![Searching across projects: one term, matches in two different repos](docs/search.png)
@@ -41,6 +43,10 @@ Nothing to configure and nothing to install. It reads your existing logs each ti
 **Browsing.** The tool opens showing the last 48 hours. Switch to **7 days** or **All** (the full 4-week window) with the buttons in the top bar. Click any conversation on the left to read it on the right.
 
 **Searching.** Type in the search box. The list narrows to conversations containing your term, each showing a snippet of the match. The time range applies to search too — start with **48h** for something recent, widen to **All** when you're digging.
+
+**Searching by file.** Start the search with `file:` to search paths instead of prose — `file:dashboard.py`. A list of matching files drops down as you type; pick one with the arrow keys or the mouse to narrow to the conversations that touched exactly that file. Each result shows which paths matched. Only files Claude actually read or wrote are indexed, so this finds work, not directory listings.
+
+**Picking it back up.** Every open conversation has a **Resume** button. It copies `cd <project> && claude --resume <id>` — paste it into a terminal to carry on where you left off.
 
 **Cross-reference.** Click **Cross-reference** to have Claude read your recent conversations and group them. It takes about a minute and calls the `claude` CLI once. When it finishes:
 
@@ -72,6 +78,7 @@ The knobs are constants at the top of `dashboard.py`:
 | `WEEKS` | `4` | How far back to scan; older conversations are ignored entirely |
 | `MAX_ANALYZE_SESSIONS` | `40` | How many recent conversations Cross-reference sends to Claude |
 | `SAMPLE_CHARS` | `700` | How much of each conversation is sampled for Cross-reference |
+| `MAX_COMPLETIONS` | `20` | How many paths the `file:` autocomplete offers at once |
 
 Two environment variables are useful for pointing the viewer somewhere other than your live logs:
 
