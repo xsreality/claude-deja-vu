@@ -20,7 +20,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -34,6 +34,7 @@ WEEKS = 4
 WINDOW_SECONDS = WEEKS * 7 * 24 * 3600
 SAMPLE_CHARS = 700  # chars sent to Claude per session (start+middle+end)
 MAX_ANALYZE_SESSIONS = 40  # cap the batch so the prompt stays small enough to parse
+MAX_DAY_PROJECTS = 4  # projects named in one day's timeline tooltip
 
 SCOPES = {"48h": 48 * 3600, "7d": 7 * 24 * 3600, "all": WINDOW_SECONDS}
 
@@ -372,24 +373,50 @@ def session_view(s, term=None, fterm=None):
     }
 
 
+def day_histogram(sessions, days=WEEKS * 7):
+    """Daily message volume across the whole window, oldest day first.
+
+    A conversation lands on the day it was last active — the same instant the
+    list sorts and labels it by, so the strip and the list agree.
+    """
+    span = [date.today() - timedelta(days=i) for i in range(days - 1, -1, -1)]
+    buckets = {d.isoformat(): {"d": d.isoformat(), "m": 0, "c": 0, "p": {}} for d in span}
+    for s in sessions:
+        b = buckets.get(date.fromtimestamp(s["last"]).isoformat())
+        if b is None:
+            continue  # older than the window, or (rarely) a clock-skewed future stamp
+        b["m"] += s["count"]
+        b["c"] += 1
+        b["p"][s["project"]] = b["p"].get(s["project"], 0) + s["count"]
+    out = []
+    for d in span:
+        b = buckets[d.isoformat()]
+        b["p"] = sorted(b["p"].items(), key=lambda kv: -kv[1])[:MAX_DAY_PROJECTS]
+        out.append(b)
+    return out
+
+
 def api_sessions(q, scope):
     sessions = scan_all()
     merge_insights(sessions, load_insights())
-    window = SCOPES.get(scope, WINDOW_SECONDS)
-    cutoff = time.time() - window
-    sessions = [s for s in sessions if s["last"] >= cutoff]
     fterm = file_term(q)
     if fterm is not None:
         sessions = [s for s in sessions if matching_files(s, fterm)]
     elif q:
         ql = q.lower()
         sessions = [s for s in sessions if ql in s["blob"].lower()]
-    clusters = sorted({c for s in sessions for c in s.get("clusters", []) if c})
+    # The strip spans the whole window even when the list is scoped tighter —
+    # its job is to show when the matches happened, including outside the scope.
+    days = day_histogram(sessions)
+    cutoff = time.time() - SCOPES.get(scope, WINDOW_SECONDS)
+    scoped = [s for s in sessions if s["last"] >= cutoff]
+    clusters = sorted({c for s in scoped for c in s.get("clusters", []) if c})
     return {
-        "sessions": [session_view(s, q or None, fterm) for s in sessions],
+        "sessions": [session_view(s, q or None, fterm) for s in scoped],
         "clusters": clusters,
         "analyzed": bool(load_insights()),
-        "files": complete_files(sessions, fterm) if fterm is not None else [],
+        "files": complete_files(scoped, fterm) if fterm is not None else [],
+        "days": days,
     }
 
 
@@ -448,11 +475,13 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
   --sans:-apple-system,system-ui,'Segoe UI',sans-serif;
   --bg:#f2f1ee; --pane:#fbfaf8; --ink:#1e1d1b; --faded:#78746c; --line:#dedbd4;
   --sel:#eceae4; --accent:#a6382a; --accent-soft:rgba(166,56,42,.13);
+  --tip-bg:#171615; --tip-ink:#faf9f7;  /* the tooltip stays dark in both themes */
   color-scheme:light dark;
 }
 @media(prefers-color-scheme:dark){:root{
   --bg:#131315; --pane:#191a1d; --ink:#e6e4df; --faded:#8b8781; --line:#2a2b2f;
   --sel:#232529; --accent:#e0705a; --accent-soft:rgba(224,112,90,.18);
+  --tip-bg:#08090a; --tip-ink:#e9e7e2;
 }}
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -481,6 +510,31 @@ header{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
 #ac .base{white-space:nowrap}
 #ac .dir{color:var(--faded);font-size:11.5px;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* ---- timeline strip: one cell per day of the window ---- */
+#strip{display:none;gap:16px;align-items:flex-end;padding:10px 18px 7px;
+  background:var(--pane);border-bottom:1px solid var(--line)}
+#strip.on{display:flex}
+#strip .head{font:700 11px/1 var(--mono);letter-spacing:.13em;text-transform:uppercase;
+  color:var(--faded);padding-bottom:19px}
+#days{display:flex;gap:3px;align-items:flex-end}
+.day{flex:0 0 15px;background:0;border:0;padding:0;cursor:default;
+  display:flex;flex-direction:column;align-items:stretch;justify-content:flex-end}
+.day.has{cursor:pointer}
+.bar{background:var(--line);border-radius:2px}
+.day.has .bar{background:var(--accent)}
+.day.has:hover .bar,.day.on .bar{background:var(--ink)}
+.day .lbl{font:10px/12px var(--mono);color:var(--faded);height:12px;margin-top:6px;
+  white-space:nowrap}
+.day.on .lbl{color:var(--ink)}
+#tip{position:fixed;z-index:30;display:none;pointer-events:none;max-width:340px;
+  background:var(--tip-bg);color:var(--tip-ink);border-radius:8px;padding:10px 13px;
+  box-shadow:0 12px 30px rgba(0,0,0,.28)}
+#tip.on{display:block}
+#tip .t-day{font:600 13px/1.4 var(--sans)}
+#tip .t-sum{font:11.5px/1.5 var(--mono);opacity:.66;margin-bottom:2px}
+#tip .t-row{display:flex;justify-content:space-between;gap:16px;
+  font:11.5px/1.65 var(--mono);opacity:.92}
+#tip .t-row b{font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .scope{display:inline-flex;background:var(--bg);border:1px solid var(--line);
   border-radius:6px;padding:2px}
 .scope button{font:600 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;
@@ -605,6 +659,9 @@ mark{background:var(--accent-soft);color:var(--accent);font-weight:700;padding:0
   <button id="analyze">Cross-reference</button>
   <span id="msg"></span>
 </header>
+<div id="strip"><span class="head">Activity</span>
+  <div id="days" aria-label="Daily activity, last 4 weeks"></div></div>
+<div id="tip" role="tooltip"></div>
 <div id="chips"></div>
 <div class="panes">
   <div class="left">
@@ -626,7 +683,7 @@ mark{background:var(--accent-soft);color:var(--accent);font-weight:700;padding:0
   </div>
 </div>
 <script>
-let CLUSTER=null, SCOPE='48h', SELECTED=null, DATA={sessions:[],clusters:[]};
+let CLUSTER=null, SCOPE='48h', SELECTED=null, DAY=null, DATA={sessions:[],clusters:[]};
 const SCOPES_OK=['48h','7d','all'];
 function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 function rel(t){const d=Date.now()/1000-t;if(d<3600)return Math.round(d/60)+'m';
@@ -737,7 +794,7 @@ function syncURL(){const p=new URLSearchParams(),q=qval();
     +(SELECTED?'#'+encodeURIComponent(SELECTED):''))}
 async function load(){
   const r=await fetch('/api/sessions?q='+encodeURIComponent(qval())+'&scope='+SCOPE);
-  DATA=await r.json();render();renderChips();renderFiles();syncURL();
+  DATA=await r.json();render();renderChips();renderDays();renderFiles();syncURL();
   // #<session-id> opens that conversation directly, so a link to one can be bookmarked.
   const h=decodeURIComponent(location.hash.slice(1));
   if(h&&h!==SELECTED)openDetail(h)}
@@ -757,15 +814,72 @@ function renderChips(){const el=document.getElementById('chips');el.innerHTML=''
     s.innerHTML=esc(c)+'<span class=n>'+n+'</span>';
     s.title=n+(n===1?' conversation':' conversations')+' in this topic';
     s.onclick=()=>{CLUSTER=(CLUSTER===c?null:c);render();renderChips()};el.appendChild(s)})}
+// --- timeline strip ---------------------------------------------------------
+// Local calendar day of an epoch second, as YYYY-MM-DD to match the server's keys.
+function dayKey(t){return new Date(t*1000).toLocaleDateString('en-CA')}
+function dayLabel(d,opts){return new Date(d+'T00:00').toLocaleDateString(undefined,opts)}
+function dayTip(d){
+  if(!d.m)return dayLabel(d.d,{weekday:'long',day:'numeric',month:'long'})+' — nothing';
+  const head=dayLabel(d.d,{weekday:'long',day:'numeric',month:'long'})+' — '
+    +d.c+(d.c===1?' conversation, ':' conversations, ')+d.m+' messages';
+  return [head].concat((d.p||[]).map(([p,m])=>'  '+proj(p)+' '+m)).join('\\n')}
+// Own tooltip rather than title=: the native one is small, slow, and unstyleable.
+function tipHide(){document.getElementById('tip').classList.remove('on')}
+function tipShow(btn){
+  const d=(DATA.days||[]).find(x=>x.d===btn.dataset.d);if(!d)return;
+  const el=document.getElementById('tip');
+  el.innerHTML='<div class=t-day>'+esc(dayLabel(d.d,{weekday:'long',day:'numeric',
+      month:'long'}))+'</div><div class=t-sum>'
+    +(d.m?d.c+(d.c===1?' conversation · ':' conversations · ')+d.m+' messages':'nothing')
+    +'</div>'+(d.p||[]).map(([p,m])=>
+      '<div class=t-row><b>'+esc(proj(p))+'</b><span>'+m+'</span></div>').join('');
+  el.classList.add('on');
+  const r=btn.getBoundingClientRect(),w=el.offsetWidth;
+  el.style.left=Math.round(Math.min(Math.max(8,r.left+r.width/2-w/2),
+    innerWidth-w-8))+'px';
+  el.style.top=Math.round(r.bottom+8)+'px'}
+document.getElementById('days').addEventListener('mouseover',e=>{
+  const b=e.target.closest('.day');if(b)tipShow(b)});
+document.getElementById('days').addEventListener('focusin',e=>{
+  const b=e.target.closest('.day');if(b)tipShow(b)});
+document.getElementById('days').addEventListener('mouseleave',tipHide);
+document.getElementById('days').addEventListener('focusout',tipHide);
+function renderDays(){
+  const el=document.getElementById('days'),ds=DATA.days||[];
+  const max=Math.max(0,...ds.map(d=>d.m));
+  document.getElementById('strip').classList.toggle('on',max>0);
+  tipHide();  // the hovered button is about to be replaced, so no mouseleave fires
+  if(!max)return;
+  el.innerHTML=ds.map((d,i)=>{
+    // sqrt keeps a quiet day visible beside a 3000-message one; 34px is the full height
+    const h=d.m?Math.max(3,Math.round(Math.sqrt(d.m/max)*34)):2;
+    return '<button class="day'+(d.m?' has':'')+(d.d===DAY?' on':'')+'" data-d="'+d.d+'"'
+      +' aria-label="'+esc(dayTip(d))+'"'+(d.m?'':' tabindex=-1')+'>'
+      +'<span class=bar style="height:'+h+'px"></span>'
+      +'<span class=lbl>'+(i%7===0?esc(dayLabel(d.d,{day:'numeric',month:'short'})):'')
+      +'</span></button>'}).join('')}
+document.getElementById('days').addEventListener('click',e=>{
+  const b=e.target.closest('.day');
+  if(!b||!b.classList.contains('has'))return;
+  DAY=(DAY===b.dataset.d?null:b.dataset.d);
+  // A day outside the current scope has no rows to filter, so widen to the full window.
+  if(DAY&&SCOPE!=='all')return setScope('all');
+  render();renderDays()});
+function setScope(sc){SCOPE=sc;
+  document.querySelectorAll('.scope button')
+    .forEach(x=>x.classList.toggle('on',x.dataset.scope===sc));
+  load()}
 function visible(){let ss=DATA.sessions||[];
-  return CLUSTER?ss.filter(s=>(s.clusters||[]).includes(CLUSTER)):ss}
+  if(CLUSTER)ss=ss.filter(s=>(s.clusters||[]).includes(CLUSTER));
+  return DAY?ss.filter(s=>dayKey(s.last)===DAY):ss}
 function render(){
   const q=qval(),ht=hterm(),ss=visible();
   const list=document.getElementById('list'),cnt=document.getElementById('count');
+  const onDay=DAY?' on '+dayLabel(DAY,{day:'numeric',month:'short'}):'';
   if(!ss.length){cnt.textContent='no matches';
     list.innerHTML='<div class=empty>'+(q?'Nothing found for “'+esc(q)+'”.'
       :'No conversations in this range.')+'</div>';return}
-  cnt.textContent=ss.length+(ss.length===1?' conversation':' conversations');
+  cnt.textContent=ss.length+(ss.length===1?' conversation':' conversations')+onDay;
   const now=Date.now()/1000;
   list.innerHTML=ss.map(s=>{
     const recent=(now-s.last)<48*3600;
@@ -826,10 +940,9 @@ document.getElementById('list').addEventListener('keydown',e=>{
 document.getElementById('d-close').addEventListener('click',closeDetail);
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'&&SELECTED)closeDetail()});
+// Picking a range by hand drops the day filter; the two are different questions.
 document.querySelectorAll('.scope button').forEach(b=>b.onclick=()=>{
-  SCOPE=b.dataset.scope;
-  document.querySelectorAll('.scope button').forEach(x=>x.classList.toggle('on',x===b));
-  load()});
+  DAY=null;setScope(b.dataset.scope)});
 document.getElementById('q').addEventListener('input',debounce(load,200));
 document.getElementById('analyze').addEventListener('click',async()=>{
   const m=document.getElementById('msg');m.textContent='Reading your conversations…';
@@ -906,6 +1019,20 @@ def _selftest():
     blob = "S" * 1000 + "MID" + "E" * 1000
     samp = sample_text(blob, 300)
     assert "MID" in samp and samp.startswith("S") and samp.endswith("E")
+
+    # day histogram: one bucket per day, oldest first, gaps kept as zeroes
+    now = time.time()
+    hist = day_histogram([
+        {"last": now, "count": 5, "project": "/repo/a"},
+        {"last": now, "count": 3, "project": "/repo/b"},
+        {"last": now - 2 * 86400, "count": 7, "project": "/repo/a"},
+        {"last": now - 999 * 86400, "count": 99, "project": "/old"},  # outside the window
+    ], days=4)
+    assert [b["d"] for b in hist] == sorted(b["d"] for b in hist), hist  # oldest first
+    assert [b["m"] for b in hist] == [0, 7, 0, 8], hist
+    assert [b["c"] for b in hist] == [0, 1, 0, 2], hist
+    assert hist[-1]["p"] == [("/repo/a", 5), ("/repo/b", 3)], hist[-1]  # busiest first
+    assert hist[-1]["d"] == date.today().isoformat()
 
     # merge tolerates missing/extra ids
     sessions = [{"id": "a", "blob": ""}, {"id": "b", "blob": ""}]

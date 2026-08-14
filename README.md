@@ -13,6 +13,7 @@ If you run Claude Code across many terminals and repos, related discussions end 
 - **See what you've been working on.** Conversations from the last 4 weeks, newest first, with the project, git branch, age, and message count.
 - **Search everything.** One box searches the full text of every message in every conversation. Results show a snippet with the match in context, so you can tell which conversation is the one you want.
 - **Find the conversation that touched a file.** Type `file:` and a path fragment. Completions appear as you type, and the results are the conversations where Claude read or edited that file.
+- **See when it happened.** An activity strip shows one bar per day across the whole 4-week window. Click a day to filter the list to it. When you search, the strip narrows to days with matches — so it answers "which week was that?" before you start scrolling.
 - **Jump straight to the match.** Open a search result and the transcript scrolls to the first hit, with every occurrence highlighted.
 - **Read comfortably.** Transcripts render markdown — headings, lists, tables, and code blocks — instead of a wall of raw text.
 - **Resume where you left off.** One click copies the `cd … && claude --resume …` command for the conversation you're reading.
@@ -43,6 +44,8 @@ Nothing to configure and nothing to install. It reads your existing logs each ti
 **Browsing.** The tool opens showing the last 48 hours. Switch to **7 days** or **All** (the full 4-week window) with the buttons in the top bar. Click any conversation on the left to read it on the right.
 
 **Searching.** Type in the search box. The list narrows to conversations containing your term, each showing a snippet of the match. The time range applies to search too — start with **48h** for something recent, widen to **All** when you're digging.
+
+**The activity strip.** Under the search box, one bar per day for the last 4 weeks, sized by how many messages that day held. Hover a bar for the date, the conversation and message counts, and which projects the day went to. Click one to see only that day — the range switches to **All** so the day is reachable whatever you were looking at, and clicking again clears it. The strip always covers the full window, not the selected range, so a spike three weeks back is still visible while you're browsing the last 48 hours. It reflects your search: with a term in the box, only days containing matches have bars.
 
 **Searching by file.** Start the search with `file:` to search paths instead of prose — `file:dashboard.py`. A list of matching files drops down as you type; pick one with the arrow keys or the mouse to narrow to the conversations that touched exactly that file. Each result shows which paths matched. Only files Claude actually read or wrote are indexed, so this finds work, not directory listings.
 
