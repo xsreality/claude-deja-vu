@@ -473,6 +473,8 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 :root{
   --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
   --sans:-apple-system,system-ui,'Segoe UI',sans-serif;
+  /* labels: quiet lowercase sans, no tracking -- content leads, labels recede */
+  --label:var(--sans);
   --bg:#f2f1ee; --pane:#fbfaf8; --ink:#1e1d1b; --faded:#78746c; --line:#dedbd4;
   --sel:#eceae4; --accent:#a6382a; --accent-soft:rgba(166,56,42,.13);
   --tip-bg:#171615; --tip-ink:#faf9f7;  /* the tooltip stays dark in both themes */
@@ -514,8 +516,9 @@ header{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
 #strip{display:none;gap:16px;align-items:flex-end;padding:10px 18px 7px;
   background:var(--pane);border-bottom:1px solid var(--line)}
 #strip.on{display:flex}
-#strip .head{font:700 11px/1 var(--mono);letter-spacing:.13em;text-transform:uppercase;
-  color:var(--faded);padding-bottom:19px}
+#strip .head,.scope button,#analyze,#chips .lbl,.count,.eyebrow,#d-close,#d-resume,.who{
+  font-family:var(--label);text-transform:lowercase;letter-spacing:0}
+#strip .head{font-size:12px;font-weight:500;line-height:1;color:var(--faded);padding-bottom:19px}
 #days{display:flex;gap:3px;align-items:flex-end}
 .day{flex:0 0 15px;background:0;border:0;padding:0;cursor:default;
   display:flex;flex-direction:column;align-items:stretch;justify-content:flex-end}
@@ -537,10 +540,10 @@ header{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
 #tip .t-row b{font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .scope{display:inline-flex;background:var(--bg);border:1px solid var(--line);
   border-radius:6px;padding:2px}
-.scope button{font:600 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;
+.scope button{font-size:12.5px;font-weight:500;line-height:1;
   background:0;border:0;color:var(--faded);cursor:pointer;padding:6px 10px;border-radius:4px}
 .scope button.on{background:var(--accent);color:#fff}
-#analyze{font:600 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;
+#analyze{font-size:12.5px;font-weight:500;line-height:1;
   background:0;color:var(--accent);cursor:pointer;padding:7px 11px;
   border:1px solid var(--accent);border-radius:6px;white-space:nowrap}
 #analyze:hover{background:var(--accent);color:#fff}
@@ -551,7 +554,7 @@ header{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
   background:var(--bg);border-bottom:1px solid var(--line);
   box-shadow:inset 3px 0 0 var(--accent)}
 #chips:empty{display:none}
-#chips .lbl{font:700 11px/1 var(--mono);letter-spacing:.13em;text-transform:uppercase;
+#chips .lbl{font-size:12px;font-weight:500;line-height:1;
   color:var(--accent);margin-right:6px}
 #chips .hint-inline{font:400 12.5px/1 var(--sans);color:var(--faded)}
 .chip{display:inline-flex;align-items:center;gap:8px;font:500 13px/1 var(--sans);
@@ -567,15 +570,15 @@ header{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
 .panes{flex:1;display:flex;min-height:0}
 .left{width:390px;flex:none;display:flex;flex-direction:column;
   border-right:1px solid var(--line);background:var(--pane);min-height:0}
-.count{font:400 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
-  color:var(--faded);padding:11px 18px;border-bottom:1px solid var(--line)}
+.count{font-size:12px;line-height:1;
+  color:var(--faded);padding:12px 18px;border-bottom:1px solid var(--line)}
 #list{overflow-y:auto;flex:1}
 .row{padding:13px 18px;border-bottom:1px solid var(--line);cursor:pointer;
   border-left:3px solid transparent}
 .row:hover{background:var(--sel)}
 .row.on{background:var(--sel);border-left-color:var(--accent)}
 .rtop{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
-.eyebrow{font:400 10px/1.3 var(--mono);letter-spacing:.09em;text-transform:uppercase;
+.eyebrow{font-size:11.5px;line-height:1.3;
   color:var(--faded);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .when{font:400 10px/1.3 var(--mono);color:var(--faded);white-space:nowrap}
 .row.recent .when{color:var(--accent);font-weight:700}
@@ -600,14 +603,14 @@ mark{background:var(--accent-soft);color:var(--accent);font-weight:700;padding:0
 .dtop h2{font:600 17px/1.35 var(--sans);margin:4px 0 0;max-width:900px;
   display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 .dtop-btns{flex:none;display:flex;gap:8px}
-#d-close,#d-resume{font:600 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
+#d-close,#d-resume{font-size:12px;font-weight:500;line-height:1;
   background:0;color:var(--faded);cursor:pointer;padding:7px 10px;white-space:nowrap;
   border:1px solid var(--line);border-radius:6px}
 #d-close:hover,#d-resume:hover{color:var(--accent);border-color:var(--accent)}
 #thread{overflow-y:auto;flex:1;padding:0 26px 40px}
 .msg{padding:17px 0;border-bottom:1px solid var(--line);max-width:900px}
 .msg:last-child{border-bottom:0}
-.who{font:700 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;
+.who{font-size:12px;font-weight:600;line-height:1;
   color:var(--faded);margin-bottom:8px}
 .msg.user .who{color:var(--accent)}
 .body{overflow-wrap:anywhere;font:13.5px/1.7 var(--sans)}
