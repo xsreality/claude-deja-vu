@@ -78,10 +78,32 @@ func parseCrossSession(_ text: String) -> (peer: Peer, body: String)? {
             body.trimmingCharacters(in: .whitespacesAndNewlines))
 }
 
+/// What a conversation cost and what it did, totalled over one transcript.
+///
+/// Free to collect: the detail pane already reads every line of the file. None of
+/// this is gathered during a scan, where it would be 300 files' worth of work for
+/// numbers only one session ever shows.
+struct Stats {
+    /// Every model that answered, in the order they first appear. Sessions do mix
+    /// them — a model switch mid-conversation is one file with two names in it.
+    var models: [String] = []
+    /// Everything sent, cached or not: what the conversation cost to keep going.
+    var input = 0
+    var output = 0
+    var thinking = 0
+    /// Tool calls by name, most used first.
+    var tools: [(name: String, count: Int)] = []
+    /// Wall clock from the first message to the last.
+    var span: Double = 0
+
+    var toolCalls: Int { tools.reduce(0) { $0 + $1.count } }
+}
+
 struct Transcript {
     let title: String
     let project: String
     let messages: [Message]
+    var stats = Stats()
 }
 
 // --- parsing -----------------------------------------------------------------
@@ -297,6 +319,10 @@ func readTranscript(path: String) -> Transcript {
     var fallbackTitle: String?
     var project: String?
     var messages: [Message] = []
+    var stats = Stats()
+    var toolCounts: [String: Int] = [:]
+    var first: Double?
+    var last: Double?
 
     for o in jsonLines(path) {
         let type = o["type"] as? String
@@ -307,6 +333,32 @@ func readTranscript(path: String) -> Transcript {
         guard type == "user" || type == "assistant" else { continue }
 
         let msg = o["message"] as? [String: Any] ?? [:]
+
+        // Before the empty-text check below: a turn that only called tools carries
+        // no text at all, and those are exactly the ones with tools to count.
+        if let model = msg["model"] as? String, !stats.models.contains(model) {
+            stats.models.append(model)
+        }
+        if let usage = msg["usage"] as? [String: Any] {
+            // Cache reads are the bulk of it, and they are still tokens that went
+            // to the model — one "in" number, broken out in the tooltip.
+            for key in ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"] {
+                stats.input += usage[key] as? Int ?? 0
+            }
+            stats.output += usage["output_tokens"] as? Int ?? 0
+            stats.thinking += (usage["output_tokens_details"] as? [String: Any])?["thinking_tokens"]
+                as? Int ?? 0
+        }
+        for b in msg["content"] as? [Any] ?? [] {
+            guard let d = b as? [String: Any], d["type"] as? String == "tool_use",
+                  let name = d["name"] as? String else { continue }
+            toolCounts[name, default: 0] += 1
+        }
+        if let ep = epoch(o["timestamp"]) {
+            first = first.map { min($0, ep) } ?? ep
+            last = last.map { max($0, ep) } ?? ep
+        }
+
         let text = textOf(msg["content"])
         if text.isEmpty { continue }
         if let c = o["cwd"] as? String, !c.isEmpty { project = c }
@@ -323,8 +375,12 @@ func readTranscript(path: String) -> Transcript {
                                 text: unwrapped?.body ?? text,
                                 ts: epoch(o["timestamp"]), from: unwrapped?.peer))
     }
+    stats.tools = toolCounts.sorted { $0.value > $1.value || ($0.value == $1.value && $0.key < $1.key) }
+        .map { (name: $0.key, count: $0.value) }
+    stats.span = (last ?? 0) - (first ?? 0)
     return Transcript(title: titled(customTitle, fallbackTitle),
-                      project: project ?? "(unknown)", messages: mergeRuns(messages))
+                      project: project ?? "(unknown)", messages: mergeRuns(messages),
+                      stats: stats)
 }
 
 // --- observable state --------------------------------------------------------

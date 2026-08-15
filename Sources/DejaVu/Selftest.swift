@@ -271,6 +271,33 @@ func runSelftest() {
     many.sessions = 2
     assert(daySummary(many) == "2 conversations · 3 messages")
 
+    // --- transcript stats ---
+    // Two assistant turns, one of them tool-only (no text at all) — that turn is
+    // dropped from the messages but its tools and tokens must still be counted.
+    let statsPath = write("stats.jsonl", [
+        #"{"type":"user","message":{"role":"user","content":"go"},"timestamp":"2026-08-13T10:00:00.000Z"}"#,
+        #"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"on it"}],"usage":{"input_tokens":10,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000,"output_tokens":7,"output_tokens_details":{"thinking_tokens":3}}},"timestamp":"2026-08-13T10:00:30.000Z"}"#,
+        #"{"type":"assistant","message":{"role":"assistant","model":"claude-haiku-4-5-20251001","content":[{"type":"tool_use","name":"Bash","input":{}},{"type":"tool_use","name":"Bash","input":{}},{"type":"tool_use","name":"Edit","input":{"file_path":"/w/a.swift"}}],"usage":{"input_tokens":1,"output_tokens":2}},"timestamp":"2026-08-13T10:20:00.000Z"}"#,
+    ])
+    let st = readTranscript(path: statsPath).stats
+    assert(st.models == ["claude-opus-5", "claude-haiku-4-5-20251001"], "first-seen order, no repeats")
+    assert(st.input == 1111, "fresh + cache creation + cache read")
+    assert(st.output == 9 && st.thinking == 3)
+    assert(st.tools.map(\.name) == ["Bash", "Edit"], "most used first")
+    assert(st.tools.first!.count == 2)
+    assert(st.toolCalls == 3)
+    assert(st.span == 1200, "20 minutes from first message to last")
+    assert(readTranscript(path: statsPath).messages.count == 2, "the tool-only turn has no text to show")
+    assert(readTranscript(path: empty).stats.models.isEmpty, "an empty file has no stats")
+
+    assert(compact(842) == "842")
+    assert(compact(1234) == "1.2k" && compact(12_345) == "12k" && compact(2_400_000) == "2.4M")
+    assert(spanLabel(45) == "45s" && spanLabel(1200) == "20m")
+    assert(spanLabel(7200) == "2h" && spanLabel(15_120) == "4h 12m")
+    assert(shortModel("claude-opus-5") == "opus-5")
+    assert(shortModel("claude-haiku-4-5-20251001") == "haiku-4-5", "the date stamp is noise")
+    assert(shortModel("some-other-model") == "some-other-model")
+
     // --- incremental rescans ---
     // The one thing that needs scanAll itself: it reuses a cached parse when the
     // file's mtime is unchanged, and must not when it changed. `projectsDir` is a

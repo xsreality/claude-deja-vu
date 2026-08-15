@@ -529,6 +529,35 @@ func age(_ epochSeconds: Double) -> String {
     relative.localizedString(for: Date(timeIntervalSince1970: epochSeconds), relativeTo: Date())
 }
 
+/// 842, 12.4k, 2.4M — token counts run to seven digits, and nobody reads those.
+func compact(_ n: Int) -> String {
+    switch n {
+    case 1_000_000...: String(format: "%.1fM", Double(n) / 1_000_000)
+    case 10_000...: "\(n / 1000)k"
+    case 1_000...: String(format: "%.1fk", Double(n) / 1000)
+    default: "\(n)"
+    }
+}
+
+/// "4h 12m", "35m", "50s" — a conversation's wall clock, not a duration to the second.
+func spanLabel(_ seconds: Double) -> String {
+    let s = Int(seconds.rounded())
+    if s >= 3600 { return s % 3600 / 60 == 0 ? "\(s / 3600)h" : "\(s / 3600)h \(s % 3600 / 60)m" }
+    if s >= 60 { return "\(s / 60)m" }
+    return "\(s)s"
+}
+
+/// Model ids are long and all start the same way; the part that differs is enough.
+func shortModel(_ id: String) -> String {
+    let name = id.hasPrefix("claude-") ? String(id.dropFirst("claude-".count)) : id
+    // Drop a trailing date stamp: claude-haiku-4-5-20251001 -> haiku-4-5
+    let parts = name.split(separator: "-")
+    if let last = parts.last, last.count == 8, Int(last) != nil {
+        return parts.dropLast().joined(separator: "-")
+    }
+    return name
+}
+
 // --- transcript --------------------------------------------------------------
 
 /// A message plus its parsed blocks. Markdown is parsed once when the transcript
@@ -552,6 +581,7 @@ struct TranscriptView: View {
     let store: Store
     let onOpen: (Session.ID) -> Void
     @State private var messages: [RenderedMessage] = []
+    @State private var stats = Stats()
     @State private var copied = false
     /// Which session the messages on screen belong to, so a reload can tell a
     /// switch to another conversation from more text arriving in this one.
@@ -588,16 +618,19 @@ struct TranscriptView: View {
                 // Blanking on a live append would flash the pane and lose the
                 // scroll position; only a different conversation earns that.
                 messages = []
+                stats = Stats()
             }
             let path = session.path
-            let parsed = await Task.detached(priority: .userInitiated) {
-                readTranscript(path: path).messages.map {
+            let result = await Task.detached(priority: .userInitiated) { () -> ([RenderedMessage], Stats) in
+                let t = readTranscript(path: path)
+                return (t.messages.map {
                     RenderedMessage(id: $0.id, role: $0.role, ts: $0.ts,
                                     text: $0.text, blocks: parseBlocks($0.text), from: $0.from)
-                }
+                }, t.stats)
             }.value
+            stats = result.1
             // Tracing a peer needs the scanned session list, which lives out here.
-            messages = parsed.map { m in
+            messages = result.0.map { m in
                 guard let peer = m.from else { return m }
                 var m = m
                 m.senderID = store.sender(peer, at: m.ts)?.id
@@ -620,6 +653,7 @@ struct TranscriptView: View {
                 Text(session.title)
                     .font(.system(size: 17, weight: .semibold))
                     .lineLimit(1)
+                StatsLine(stats: stats, session: session)
             }
             Spacer(minLength: 0)
             Button {
@@ -645,6 +679,67 @@ struct TranscriptView: View {
                   $0.text.range(of: term, options: .caseInsensitive) != nil
               }) else { return }
         withAnimation { proxy.scrollTo(hit.id, anchor: .center) }
+    }
+}
+
+/// One line of "what this conversation was", under the title: branch, models,
+/// wall clock, size, and what it cost. The full breakdown is a tooltip — the
+/// header is for recognising a conversation, not for auditing it.
+struct StatsLine: View {
+    let stats: Stats
+    let session: Session
+
+    var body: some View {
+        if !parts.isEmpty {
+            Text(parts.joined(separator: "  ·  "))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(detail)
+                .padding(.top, 2)
+        }
+    }
+
+    private var parts: [String] {
+        var out: [String] = []
+        if let branch = session.branch { out.append(branch) }
+        if !stats.models.isEmpty {
+            out.append(stats.models.map(shortModel).joined(separator: " + "))
+        }
+        if stats.span >= 1 { out.append(spanLabel(stats.span)) }
+        out.append("\(session.count) msgs")
+        if !session.files.isEmpty { out.append("\(session.files.count) files") }
+        if stats.toolCalls > 0 { out.append("\(stats.toolCalls) tools") }
+        if stats.input + stats.output > 0 {
+            out.append("\(compact(stats.input))↓ \(compact(stats.output))↑")
+        }
+        return out
+    }
+
+    /// Spelled out, with the numbers the one-liner rounds off.
+    private var detail: String {
+        var lines: [String] = []
+        if !stats.models.isEmpty {
+            lines.append("Models: " + stats.models.map(shortModel).joined(separator: ", "))
+        }
+        if stats.input + stats.output > 0 {
+            // "in" is everything sent, cache reads included — that is what the log
+            // records and what the context actually cost to carry.
+            var t = "Tokens: \(stats.input.formatted()) in (cache included)"
+                + ", \(stats.output.formatted()) out"
+            if stats.thinking > 0 { t += ", \(stats.thinking.formatted()) thinking" }
+            lines.append(t)
+        }
+        if !stats.tools.isEmpty {
+            let top = stats.tools.prefix(6).map { "\($0.name) \($0.count)" }
+            lines.append("Tools: " + top.joined(separator: ", ")
+                + (stats.tools.count > 6 ? ", +\(stats.tools.count - 6) more" : ""))
+        }
+        if !session.peers.isEmpty {
+            lines.append("Messaged by: " + session.peers.joined(separator: ", "))
+        }
+        return lines.joined(separator: "\n")
     }
 }
 
