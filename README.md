@@ -32,7 +32,7 @@ If you run Claude Code across many terminals and repos, related discussions end 
 ```bash
 git clone https://github.com/xsreality/claude-deja-vu.git
 cd claude-deja-vu
-python3 dashboard.py
+python3 python/dashboard.py
 ```
 
 Then open **http://127.0.0.1:8765**. Press `Ctrl-C` to stop it.
@@ -57,7 +57,7 @@ Nothing to configure and nothing to install. It reads your existing logs each ti
 - A **Topics** bar appears with each topic and how many conversations it contains.
 - Click a topic to filter the list to it; click again to clear.
 
-Results are saved to `insights.json`, so they load instantly afterwards and no further Claude calls happen until you click Cross-reference again. Delete `insights.json` to reset. Re-run it after a few days of new work to refresh the grouping.
+Results are saved to `python/insights.json`, so they load instantly afterwards and no further Claude calls happen until you click Cross-reference again. Delete it to reset. Re-run it after a few days of new work to refresh the grouping.
 
 **Linking.** The URL tracks what you're looking at, so you can bookmark a view or paste it into your notes:
 
@@ -73,7 +73,7 @@ Results are saved to `insights.json`, so they load instantly afterwards and no f
 
 ## Adjusting it
 
-The knobs are constants at the top of `dashboard.py`:
+The knobs are constants at the top of `python/dashboard.py`:
 
 | Setting | Default | What it does |
 |---|---|---|
@@ -86,7 +86,7 @@ The knobs are constants at the top of `dashboard.py`:
 Two environment variables are useful for pointing the viewer somewhere other than your live logs:
 
 ```bash
-DEJAVU_PROJECTS_DIR=/path/to/logs DEJAVU_INSIGHTS=/path/to/insights.json python3 dashboard.py
+DEJAVU_PROJECTS_DIR=/path/to/logs DEJAVU_INSIGHTS=/path/to/insights.json python3 python/dashboard.py
 ```
 
 ## Good to know
@@ -99,7 +99,7 @@ DEJAVU_PROJECTS_DIR=/path/to/logs DEJAVU_INSIGHTS=/path/to/insights.json python3
 To check the parsing logic still works after any change:
 
 ```bash
-python3 dashboard.py --selftest
+python3 python/dashboard.py --selftest
 ```
 
 ## License
