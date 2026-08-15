@@ -271,5 +271,67 @@ func runSelftest() {
     many.sessions = 2
     assert(daySummary(many) == "2 conversations · 3 messages")
 
+    // --- incremental rescans ---
+    // The one thing that needs scanAll itself: it reuses a cached parse when the
+    // file's mtime is unchanged, and must not when it changed. `projectsDir` is a
+    // lazy global, so pointing it here works only because nothing above touched it.
+    let live = dir.appendingPathComponent("live").path
+    try! FileManager.default.createDirectory(atPath: live, withIntermediateDirectories: true)
+    setenv("DEJAVU_PROJECTS_DIR", live, 1)
+    let stamp = ISO8601DateFormatter().string(from: Date())
+    let livePath = live + "/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl"
+    func append(_ text: String) {
+        let line = #"{"type":"user","message":{"role":"user","content":"\#(text)"},"timestamp":"\#(stamp)"}"#
+        let old = (try? String(contentsOfFile: livePath, encoding: .utf8)).map { $0 + "\n" } ?? ""
+        try! (old + line).write(toFile: livePath, atomically: true, encoding: .utf8)
+    }
+
+    append("first")
+    let cold = scanAll()
+    assert(cold.sessions.count == 1 && cold.sessions[0].count == 1)
+    assert(cold.cache.count == 1)
+
+    // Grow the file but pin its mtime back: the only way to tell a reused parse
+    // from a fresh one is to make the two disagree.
+    let mtime = try! FileManager.default.attributesOfItem(atPath: livePath)[.modificationDate]!
+    append("second")
+    try! FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: livePath)
+    assert(scanAll(cache: cold.cache).sessions[0].count == 1, "same mtime, cached parse reused")
+
+    // And now for real, with the mtime the append actually produced.
+    append("third")
+    let warm = scanAll(cache: cold.cache)
+    assert(warm.sessions[0].count == 3, "a changed file is re-parsed, not served stale")
+
+    try! FileManager.default.removeItem(atPath: livePath)
+    assert(scanAll(cache: warm.cache).sessions.isEmpty, "a deleted file leaves the cache")
+    unsetenv("DEJAVU_PROJECTS_DIR")
+
+    // --- insights ---
+    // What the CLI actually returns is noisy: fences, a preamble, a trailing line.
+    let cliOutput = """
+        Sure! Here you go:
+        ```json
+        {"summaries": {"a": "did X"},
+         "clusters": [{"label": "topic", "session_ids": ["a", "missing"]}]}
+        ```
+        """
+    let parsed = extractInsights(cliOutput)!
+    assert(parsed.summaries["a"] == "did X")
+    assert(parsed.labelsByID == ["a": ["topic"], "missing": ["topic"]],
+           "ids Claude invented are dropped later, by lookup, not here")
+    assert(extractInsights("no json here") == nil)
+    assert(extractInsights(#"{"summaries": {"a": "x"}}"#)?.clusters.isEmpty == true,
+           "half a reply still decodes")
+
+    // Round-trips through the cache format the Python viewer also writes.
+    let encoded = try! JSONEncoder().encode(Insights(summaries: ["a": "x"], clusters: []))
+    assert(try! JSONDecoder().decode(Insights.self, from: encoded).summaries == ["a": "x"])
+
+    let long = String(repeating: "ab", count: 900)   // 1800 chars
+    let sample = sampleText(long, limit: 300)
+    assert(sample.count < long.count && sample.contains("…"))
+    assert(sampleText("short", limit: 300) == "short", "under the limit passes through")
+
     print("selftest ok")
 }

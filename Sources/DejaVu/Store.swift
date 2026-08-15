@@ -230,22 +230,39 @@ func parseSession(path: String) -> Session? {
     )
 }
 
-/// Parsed sessions active within the last 4 weeks, newest activity first.
-func scanAll() -> [Session] {
+/// What a previous scan made of one file. `session` is nil for a file that parsed
+/// to nothing — worth remembering, so it isn't re-parsed on every pass.
+struct ScannedFile {
+    let mtime: Double
+    let session: Session?
+}
+
+/// Parsed sessions active within the last 4 weeks, newest activity first, plus
+/// what to hand back as `cache` next time.
+///
+/// Reusing unchanged files matters once the watcher is running: a live
+/// conversation appends every few seconds, and a full parse of the window takes
+/// about as long as the gap between writes. With the cache a rescan re-reads only
+/// the file that actually changed.
+func scanAll(cache: [String: ScannedFile] = [:]) -> (sessions: [Session], cache: [String: ScannedFile]) {
     let fm = FileManager.default
-    guard let walk = fm.enumerator(atPath: projectsDir) else { return [] }
+    guard let walk = fm.enumerator(atPath: projectsDir) else { return ([], [:]) }
     let cutoff = Date().timeIntervalSince1970 - windowSeconds
 
     var sessions: [Session] = []
+    var scanned: [String: ScannedFile] = [:]
     for case let rel as String in walk where rel.hasSuffix(".jsonl") {
         let path = (projectsDir as NSString).appendingPathComponent(rel)
         // cheap pre-filter: skip old files without parsing
         let attrs = try? fm.attributesOfItem(atPath: path)
         guard let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970,
               mtime >= cutoff else { continue }
-        if let s = parseSession(path: path), s.last >= cutoff { sessions.append(s) }
+        let hit = cache[path].flatMap { $0.mtime == mtime ? $0 : nil }
+            ?? ScannedFile(mtime: mtime, session: parseSession(path: path))
+        scanned[path] = hit
+        if let s = hit.session, s.last >= cutoff { sessions.append(s) }
     }
-    return sessions.sorted { $0.last > $1.last }
+    return (sessions.sorted { $0.last > $1.last }, scanned)
 }
 
 /// Collapse consecutive messages from the same speaker into one turn.
@@ -327,6 +344,18 @@ final class Store {
     var scope: Scope = .h48
     /// A day picked off the activity strip (yyyy-MM-dd), or nil.
     var selectedDay: String?
+    /// A topic chip picked from the cross-reference results, or nil.
+    var cluster: String?
+
+    /// Summaries and topics from the last `claude -p` run, if there was one.
+    private(set) var insights: Insights? = loadInsights() {
+        didSet { labels = insights?.labelsByID ?? [:] }
+    }
+    /// Topic labels per session id, inverted once rather than per rendered row.
+    private var labels: [String: [String]] = [:]
+    var analyzing = false
+    /// What the last cross-reference run had to say, shown next to the button.
+    var status: String?
 
     /// Sessions matching the query, before the scope narrows them. Stored rather
     /// than computed: scanning 4MB of text on every view update would show.
@@ -335,13 +364,68 @@ final class Store {
     /// visible while you browse a tighter one.
     private(set) var days: [DayBucket] = []
 
+    private var watcher: Watcher?
+    /// Last scan's per-file results, so a rescan only re-parses what changed.
+    private var scanCache: [String: ScannedFile] = [:]
+    private var scanning = false
+    private var rescanWhenDone = false
+
+    init() {
+        labels = insights?.labelsByID ?? [:]
+    }
+
+    /// Rescan. `quiet` is for the watcher: a live conversation writes every few
+    /// seconds, and a spinner blinking on every one of those reads as breakage.
     @MainActor
-    func refresh() async {
-        loading = true
-        sessions = await Task.detached(priority: .userInitiated) { scanAll() }.value
+    func refresh(quiet: Bool = false) async {
+        // Writes that land mid-scan don't start a second one — they queue a single
+        // repeat, so a burst can't stack up scans but also can't be lost.
+        guard !scanning else { return rescanWhenDone = true }
+        scanning = true
+        if !quiet { loading = true }
+        let cache = scanCache
+        let scan = await Task.detached(priority: .userInitiated) { scanAll(cache: cache) }.value
+        sessions = scan.sessions
+        scanCache = scan.cache
         recompute()
         loading = false
+        scanning = false
+        startWatching()
+        if rescanWhenDone {
+            rescanWhenDone = false
+            await refresh(quiet: true)
+        }
     }
+
+    /// Follow the log directory so an active conversation appears as it happens.
+    @MainActor
+    private func startWatching() {
+        guard watcher == nil else { return }
+        watcher = Watcher(path: projectsDir) { [weak self] in
+            Task { @MainActor in await self?.refresh(quiet: true) }
+        }
+    }
+
+    /// Summarize and cluster recent conversations with the local `claude` CLI.
+    @MainActor
+    func analyze() async {
+        guard !analyzing else { return }
+        analyzing = true
+        status = "Reading your conversations…"
+        let batch = sessions
+        do {
+            insights = try await Task.detached(priority: .userInitiated) {
+                try runAnalysis(batch)
+            }.value
+            status = "Cross-referenced."
+        } catch {
+            status = "Couldn’t reach Claude — \(error.localizedDescription)"
+        }
+        analyzing = false
+    }
+
+    func summary(_ s: Session) -> String? { insights?.summaries[s.id] }
+    func topics(_ s: Session) -> [String] { labels[s.id] ?? [] }
 
     private func recompute() {
         if let term = fileTerm(query) {
@@ -359,13 +443,31 @@ final class Store {
         }
     }
 
-    /// What the list shows: matches narrowed to the selected day, or to the scope.
-    var visible: [Session] {
+    /// Matches narrowed to the selected day, or to the scope — before topics.
+    private var inRange: [Session] {
         if let day = selectedDay {
             return matched.filter { dayKey($0.last) == day }
         }
         let cutoff = Date().timeIntervalSince1970 - scope.seconds
         return matched.filter { $0.last >= cutoff }
+    }
+
+    /// What the list shows.
+    var visible: [Session] {
+        guard let cluster else { return inRange }
+        return inRange.filter { topics($0).contains(cluster) }
+    }
+
+    /// The topic chips: every cluster present in what's currently in range, with
+    /// how many of those conversations it holds. Counted before the chip filter,
+    /// so picking one doesn't empty out the others.
+    var topicCounts: [(label: String, count: Int)] {
+        let rows = inRange
+        return (insights?.clusters.map(\.label) ?? [])
+            .map { label in (label, rows.filter { topics($0).contains(label) }.count) }
+            // A picked chip stays even when it empties out, or there is nothing
+            // left to click to get back.
+            .filter { $0.1 > 0 || $0.0 == cluster }
     }
 
     var completions: [String] {

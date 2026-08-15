@@ -36,13 +36,18 @@ struct ContentView: View {
         }
         .navigationTitle("Claude Déjà Vu")
         .toolbar {
-            if store.loading { ProgressView().controlSize(.small) }
+            if store.loading || store.analyzing { ProgressView().controlSize(.small) }
+            Button { Task { await store.analyze() } } label: {
+                Label("Cross-reference", systemImage: "sparkles")
+            }
+            .disabled(store.analyzing || store.sessions.isEmpty)
+            .help("Summarize and group these conversations using the local claude CLI")
             Button { Task { await store.refresh() } } label: {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
         }
         .onKeyPress(.escape) {
-            store.query = ""; store.selectedDay = nil
+            store.query = ""; store.selectedDay = nil; store.cluster = nil
             return .handled
         }
     }
@@ -76,10 +81,21 @@ struct ContentView: View {
                 .disabled(store.selectedDay != nil)
 
                 Spacer(minLength: 0)
+
+                if let status = store.status {
+                    Text(status)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: 320, alignment: .trailing)
+                }
             }
             // The completions panel hangs out of this row. Without this it draws
             // *under* the strip below, which is a later sibling in the stack.
             .zIndex(1)
+
+            TopicChips(topics: store.topicCounts, selected: $store.cluster,
+                       analyzed: store.insights != nil)
 
             HStack(alignment: .bottom, spacing: 16) {
                 Text("Activity")
@@ -106,7 +122,8 @@ struct ContentView: View {
                     .padding(.vertical, 12)
                 Divider()
                 List(store.visible, selection: $selection) { s in
-                    SessionRow(session: s, query: store.query)
+                    SessionRow(session: s, query: store.query,
+                               summary: store.summary(s), topics: store.topics(s))
                         .tag(s.id)
                         .listRowInsets(EdgeInsets(top: 13, leading: 18, bottom: 13, trailing: 18))
                         .listRowSeparator(.visible)
@@ -344,9 +361,68 @@ struct CompletionList: View {
     }
 }
 
+/// Topics found by the last cross-reference, as filter chips — or, before there
+/// has been one, the line that says what the button is for.
+struct TopicChips: View {
+    let topics: [(label: String, count: Int)]
+    @Binding var selected: String?
+    let analyzed: Bool
+
+    var body: some View {
+        if !topics.isEmpty {
+            // ponytail: scrolls sideways where the web version wraps. Seven topics
+            // of a few words already overrun the window, and wrapping would push
+            // the activity strip down a row every time Claude finds another one.
+            HStack(spacing: 8) {
+                label
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(topics, id: \.label) { t in
+                            let on = selected == t.label
+                            Button { selected = on ? nil : t.label } label: {
+                                HStack(spacing: 6) {
+                                    Text(t.label).font(.system(size: 12, weight: .medium))
+                                    Text("\(t.count)")
+                                        .font(.system(size: 10.5, design: .monospaced))
+                                        .opacity(0.6)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(on ? AnyShapeStyle(Color.accentColor)
+                                               : AnyShapeStyle(.quaternary),
+                                            in: Capsule())
+                                .foregroundStyle(on ? Color.white : .primary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("\(t.count) \(t.count == 1 ? "conversation" : "conversations") in this topic")
+                        }
+                    }
+                    .padding(.bottom, 2)   // room for the scroller to appear under
+                }
+            }
+        } else if !analyzed {
+            HStack(spacing: 8) {
+                label
+                Text("Run Cross-reference to group related conversations across projects.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private var label: some View {
+        Text("Topics")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.secondary)
+    }
+}
+
 struct SessionRow: View {
     let session: Session
     let query: String
+    /// From the last cross-reference, when there has been one.
+    var summary: String?
+    var topics: [String] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -368,6 +444,25 @@ struct SessionRow: View {
                 .lineSpacing(3)
                 .lineLimit(2)
                 .padding(.top, 5)
+
+            if let summary {
+                Text(summary)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(2)
+                    .lineLimit(2)
+                    .padding(.top, 4)
+            }
+
+            if !topics.isEmpty {
+                // "≈ topic", like the web version's .tag::before — these are
+                // approximate groupings, not labels anyone typed.
+                Text(topics.map { "≈ \($0)" }.joined(separator: "   "))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Color.accentColor)
+                    .lineLimit(1)
+                    .padding(.top, 7)
+            }
 
             if !session.peers.isEmpty {
                 // Chips under the title, like the web version's .tags row.
