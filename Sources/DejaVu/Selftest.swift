@@ -156,6 +156,12 @@ func runSelftest() {
     assert(parseSession(path: write("prose.jsonl", [caveat, cmd, prose])) != nil,
            "real prose anywhere keeps the session")
 
+    // Peers are picked up during the list scan, so rows can be badged.
+    let relayLine = #"{"type":"user","message":{"role":"user","content":"Another Claude session sent a message:\n<cross-session-message from=\"uds:/x.sock\" from-name=\"pm-analyzer\">hi</cross-session-message>"},"timestamp":"2026-08-13T10:00:04.000Z"}"#
+    let withPeer = parseSession(path: write("peer.jsonl", [prose, relayLine]))!
+    assert(withPeer.peers == ["pm-analyzer"])
+    assert(parseSession(path: write("nopeer.jsonl", [prose]))!.peers.isEmpty)
+
     // --- query layer ---
     assert(fileTerm("file:dash.py") == "dash.py")
     assert(fileTerm("FILE: /a/b ") == "/a/b", "prefix is case-insensitive and trims")
@@ -173,7 +179,8 @@ func runSelftest() {
 
     let fs = Session(id: "x", path: "", title: "", project: "", branch: nil, first: 0, last: 0,
                      count: 1, blob: "", files: ["/a/deep/nested/dash.py", "/a/dash.py",
-                                                 "/dash.py/other.txt"], blobLower: "")
+                                                 "/dash.py/other.txt"],
+                     peers: [], blobLower: "")
     assert(matchingFiles(fs, "dash.py").count == 3)
     assert(matchingFiles(fs, "DASH").count == 3, "case-insensitive")
     assert(matchingFiles(fs, "nope").isEmpty)
@@ -183,9 +190,11 @@ func runSelftest() {
 
     let now = Date().timeIntervalSince1970
     let recent = Session(id: "r", path: "", title: "", project: "/w/proj", branch: nil,
-                         first: now, last: now, count: 7, blob: "", files: [], blobLower: "")
+                         first: now, last: now, count: 7, blob: "", files: [], peers: [],
+                         blobLower: "")
     let ancient = Session(id: "a", path: "", title: "", project: "/w/old", branch: nil,
-                          first: 0, last: 0, count: 99, blob: "", files: [], blobLower: "")
+                          first: 0, last: 0, count: 99, blob: "", files: [], peers: [],
+                          blobLower: "")
     let hist = dayHistogram([recent, ancient])
     assert(hist.count == weeks * 7)
     assert(hist.last!.day == dayKey(now), "today is the last bucket")

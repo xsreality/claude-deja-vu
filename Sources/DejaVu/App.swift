@@ -369,6 +369,22 @@ struct SessionRow: View {
                 .lineLimit(2)
                 .padding(.top, 5)
 
+            if !session.peers.isEmpty {
+                // Chips under the title, like the web version's .tags row.
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.turn.down.right")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text(session.peers.prefix(2).joined(separator: ", ")
+                        + (session.peers.count > 2 ? " +\(session.peers.count - 2)" : ""))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(Color.purple)
+                .padding(.top, 6)
+                .help("Received messages from: \(session.peers.joined(separator: ", "))")
+            }
+
             if let s = subtitle {
                 Text(s)
                     .font(.system(size: 12))

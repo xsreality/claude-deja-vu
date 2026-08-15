@@ -20,6 +20,8 @@ struct Session: Identifiable, Hashable {
     let count: Int
     let blob: String
     let files: [String]
+    /// Names of other sessions that relayed a message into this one.
+    let peers: [String]
 
     /// ponytail: ~4MB of lowercased duplicate so keystroke filtering is a plain
     /// substring scan instead of ICU case folding. Drop it for an index if the
@@ -59,7 +61,9 @@ private func attribute(_ key: String, in attrs: String) -> String? {
 /// tag, the body, and then a block of guidance for the receiving session about how
 /// to treat peer requests. Only the body is conversation; the rest is machinery.
 func parseCrossSession(_ text: String) -> (peer: Peer, body: String)? {
-    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    // A Substring, not a trimmed copy: this runs on every message of every session
+    // during a scan, and almost none of them match.
+    let t = text.drop { $0.isWhitespace }
     guard t.hasPrefix(crossSessionPrefix),
           let open = t.range(of: "<cross-session-message "),
           let tagEnd = t.range(of: ">", range: open.upperBound..<t.endIndex),
@@ -167,6 +171,7 @@ func parseSession(path: String) -> Session? {
     var blobParts: [String] = []
     var files = Set<String>()
     var sawAssistantText = false
+    var peers = Set<String>()
 
     for o in jsonLines(path) {
         let type = o["type"] as? String
@@ -180,6 +185,7 @@ func parseSession(path: String) -> Session? {
         let text = textOf(msg["content"])
         if !text.isEmpty { blobParts.append(text) }
         if type == "assistant", !text.isEmpty { sawAssistantText = true }
+        if let peer = parseCrossSession(text)?.peer { peers.insert(peer.name) }
         files.formUnion(filesOf(msg["content"]))
 
         if let c = o["cwd"] as? String, !c.isEmpty { cwd = c }
@@ -219,6 +225,7 @@ func parseSession(path: String) -> Session? {
         count: count,
         blob: blob,
         files: files.sorted(),
+        peers: peers.sorted(),
         blobLower: blob.lowercased()
     )
 }
