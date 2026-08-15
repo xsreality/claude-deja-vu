@@ -53,7 +53,9 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        // Three stacked rows of controls; they need air between them or the chips
+        // read as an underline on the scope picker.
+        VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 18) {
                 TextField("Search, or file: to search paths", text: $store.query)
                     .textFieldStyle(.roundedBorder)
