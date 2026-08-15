@@ -553,6 +553,9 @@ struct TranscriptView: View {
     let onOpen: (Session.ID) -> Void
     @State private var messages: [RenderedMessage] = []
     @State private var copied = false
+    /// Which session the messages on screen belong to, so a reload can tell a
+    /// switch to another conversation from more text arriving in this one.
+    @State private var loaded: Session.ID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -569,13 +572,23 @@ struct TranscriptView: View {
                     .padding(.bottom, 40)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onChange(of: messages.count) { scrollToFirstHit(proxy) }
+                // On arriving at a conversation, not on every live append — a
+                // transcript that yanked back to the search hit each time Claude
+                // typed another line would be unreadable.
+                .onChange(of: loaded) { scrollToFirstHit(proxy) }
             }
         }
-        // Reloads whenever the selected session changes.
-        .task(id: session.id) {
-            copied = false
-            messages = []
+        // Reloads when you pick another conversation, and again whenever this one
+        // grows — the watcher hands us a new Session with a higher count, which
+        // would otherwise sit in the list while the open transcript went stale.
+        .task(id: "\(session.id)#\(session.count)") {
+            let switched = loaded != session.id
+            if switched {
+                copied = false
+                // Blanking on a live append would flash the pane and lose the
+                // scroll position; only a different conversation earns that.
+                messages = []
+            }
             let path = session.path
             let parsed = await Task.detached(priority: .userInitiated) {
                 readTranscript(path: path).messages.map {
@@ -590,6 +603,7 @@ struct TranscriptView: View {
                 m.senderID = store.sender(peer, at: m.ts)?.id
                 return m
             }
+            loaded = session.id
         }
     }
 
