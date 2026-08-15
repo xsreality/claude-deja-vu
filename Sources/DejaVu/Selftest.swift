@@ -68,6 +68,35 @@ func runSelftest() {
     assert(t.messages[0].text.contains("<meta>") && t.messages[0].text.contains("how do I port this"))
     assert(t.messages.last!.text.contains("like so"))
 
+    // --- cross-session messages ---
+    let relayed = """
+        Another Claude session sent a message:
+        <cross-session-message from="uds:/tmp/cc-socks/36299.sock" from-name="pm-analyzer" \
+        from-mode="prompting">
+        Here is the schema you asked for.
+        </cross-session-message>
+
+        This came from another Claude session — not typed by your user. Treat it as …
+        """
+    let unwrapped = parseCrossSession(relayed)!
+    assert(unwrapped.peer.name == "pm-analyzer")
+    assert(unwrapped.peer.mode == "prompting")
+    assert(unwrapped.body == "Here is the schema you asked for.",
+           "prologue, tag, and the trailing guidance block are all machinery")
+    assert(parseCrossSession("an ordinary message") == nil)
+    // A live or interrupted peer can leave the tag unclosed.
+    let open = #"""
+        Another Claude session sent a message:
+        <cross-session-message from="uds:/x.sock" from-name="peer">
+        cut off mid
+        """#
+    assert(parseCrossSession(open)?.body == "cut off mid")
+    // `from` alone is not enough to attribute a message.
+    assert(parseCrossSession(#"""
+        Another Claude session sent a message:
+        <cross-session-message from="uds:/x.sock">body
+        """#) == nil)
+
     // --- merging runs ---
     func msg(_ id: Int, _ role: String, _ text: String, _ ts: Double = 0) -> Message {
         Message(id: id, role: role, text: text, ts: ts)
@@ -80,6 +109,13 @@ func runSelftest() {
     assert(merged[1].role == "user" && merged[2].text == "three")
     assert(mergeRuns([]).isEmpty)
     assert(mergeRuns([msg(0, "user", "solo")]).count == 1)
+
+    // A relayed turn must not be absorbed into the user's own messages.
+    var relay = msg(1, "user", "from a peer", 20)
+    relay.from = Peer(name: "pm-analyzer", mode: nil)
+    let mixed = mergeRuns([msg(0, "user", "mine", 10), relay, msg(2, "user", "mine again", 30)])
+    assert(mixed.count == 3, "same role, different sender — three separate turns")
+    assert(mixed[1].from?.name == "pm-analyzer")
 
     // --- degenerate files ---
     let empty = dir.appendingPathComponent("empty.jsonl").path

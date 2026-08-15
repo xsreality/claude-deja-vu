@@ -120,7 +120,9 @@ struct ContentView: View {
         } detail: {
             if let s = store.visible.first(where: { $0.id == selection })
                 ?? store.sessions.first(where: { $0.id == selection }) {
-                TranscriptView(session: s, term: highlightTerm, resume: store.resumeCommand(s))
+                TranscriptView(session: s, term: highlightTerm,
+                               resume: store.resumeCommand(s), store: store,
+                               onOpen: { selection = $0 })
             } else {
                 ContentUnavailableView("Pick a conversation", systemImage: "text.bubble")
             }
@@ -424,12 +426,18 @@ struct RenderedMessage: Identifiable {
     let ts: Double?
     let text: String
     let blocks: [Block]
+    /// Set when the turn was relayed from another session, with the session it was
+    /// traced back to (nil when the peer is gone or was never in the window).
+    var from: Peer?
+    var senderID: Session.ID?
 }
 
 struct TranscriptView: View {
     let session: Session
     let term: String?
     let resume: String
+    let store: Store
+    let onOpen: (Session.ID) -> Void
     @State private var messages: [RenderedMessage] = []
     @State private var copied = false
 
@@ -441,7 +449,7 @@ struct TranscriptView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(messages) { m in
-                            MessageView(message: m, term: term).id(m.id)
+                            MessageView(message: m, term: term, onOpen: onOpen).id(m.id)
                         }
                     }
                     .padding(.horizontal, 26)
@@ -456,12 +464,19 @@ struct TranscriptView: View {
             copied = false
             messages = []
             let path = session.path
-            messages = await Task.detached(priority: .userInitiated) {
+            let parsed = await Task.detached(priority: .userInitiated) {
                 readTranscript(path: path).messages.map {
                     RenderedMessage(id: $0.id, role: $0.role, ts: $0.ts,
-                                    text: $0.text, blocks: parseBlocks($0.text))
+                                    text: $0.text, blocks: parseBlocks($0.text), from: $0.from)
                 }
             }.value
+            // Tracing a peer needs the scanned session list, which lives out here.
+            messages = parsed.map { m in
+                guard let peer = m.from else { return m }
+                var m = m
+                m.senderID = store.sender(peer, at: m.ts)?.id
+                return m
+            }
         }
     }
 
@@ -509,6 +524,7 @@ struct TranscriptView: View {
 struct MessageView: View {
     let message: RenderedMessage
     let term: String?
+    let onOpen: (Session.ID) -> Void
 
     private var isUser: Bool { message.role == "user" }
 
@@ -517,7 +533,10 @@ struct MessageView: View {
     /// set flush right is hard to read back, and code blocks can't align that way
     /// at all. Runs alternate after merging, so no separators are needed.
     var body: some View {
-        if isUser {
+        if let peer = message.from {
+            PeerMessageView(peer: peer, senderID: message.senderID, blocks: message.blocks,
+                            ts: message.ts, term: term, onOpen: onOpen)
+        } else if isUser {
             content
                 .padding(.horizontal, 16)
                 .padding(.vertical, 13)
@@ -553,3 +572,57 @@ struct MessageView: View {
     }
 }
 
+
+/// A turn relayed from another Claude session — neither you nor this session's
+/// Claude, so it gets its own colour and sits full width rather than in either
+/// speaker's lane. Clicking through jumps to the session it came from.
+struct PeerMessageView: View {
+    let peer: Peer
+    let senderID: Session.ID?
+    let blocks: [Block]
+    let ts: Double?
+    let term: String?
+    let onOpen: (Session.ID) -> Void
+
+    private let tint = Color.purple
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(peer.name)
+                    .font(.system(size: 12, weight: .semibold))
+                if let mode = peer.mode {
+                    Text(mode).font(.system(size: 10)).foregroundStyle(.tertiary)
+                }
+                if let ts { Text(age(ts)).font(.system(size: 10)).foregroundStyle(.tertiary) }
+
+                Spacer(minLength: 8)
+
+                if let senderID {
+                    Button { onOpen(senderID) } label: {
+                        Label("Open session", systemImage: "arrow.up.forward.square")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.borderless)
+                } else {
+                    // The socket in the tag is long dead, so an unmatched name is
+                    // all that is left — say so rather than offering a dead link.
+                    Text("sender not in window")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .foregroundStyle(tint)
+
+            MarkdownView(blocks: blocks, highlight: term)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(tint.opacity(0.25)))
+        .padding(.vertical, 9)
+    }
+}

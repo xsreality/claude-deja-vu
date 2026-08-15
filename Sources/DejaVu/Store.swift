@@ -27,11 +27,51 @@ struct Session: Identifiable, Hashable {
     let blobLower: String
 }
 
+/// The session on the other end of a cross-session message.
+struct Peer: Hashable {
+    let name: String
+    let mode: String?
+}
+
 struct Message: Identifiable, Hashable {
     let id: Int
     let role: String
     let text: String
     let ts: Double?
+    /// Set when this arrived from another Claude session rather than the user.
+    var from: Peer?
+}
+
+// --- cross-session messages --------------------------------------------------
+
+private let crossSessionPrefix = "Another Claude session sent a message"
+
+private func attribute(_ key: String, in attrs: String) -> String? {
+    guard let start = attrs.range(of: "\(key)=\"") else { return nil }
+    let rest = attrs[start.upperBound...]
+    guard let end = rest.firstIndex(of: "\"") else { return nil }
+    return String(rest[..<end])
+}
+
+/// Unwrap a message relayed from another session, keeping only what the peer said.
+///
+/// The log holds a prologue line, a `<cross-session-message from=… from-name=…>`
+/// tag, the body, and then a block of guidance for the receiving session about how
+/// to treat peer requests. Only the body is conversation; the rest is machinery.
+func parseCrossSession(_ text: String) -> (peer: Peer, body: String)? {
+    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard t.hasPrefix(crossSessionPrefix),
+          let open = t.range(of: "<cross-session-message "),
+          let tagEnd = t.range(of: ">", range: open.upperBound..<t.endIndex),
+          let name = attribute("from-name", in: String(t[open.upperBound..<tagEnd.lowerBound]))
+    else { return nil }
+
+    let attrs = String(t[open.upperBound..<tagEnd.lowerBound])
+    // A live or interrupted session can leave the tag unclosed; keep what there is.
+    let close = t.range(of: "</cross-session-message>")
+    let body = String(t[tagEnd.upperBound..<(close?.lowerBound ?? t.endIndex)])
+    return (Peer(name: name, mode: attribute("from-mode", in: attrs)),
+            body.trimmingCharacters(in: .whitespacesAndNewlines))
 }
 
 struct Transcript {
@@ -211,9 +251,11 @@ func scanAll() -> [Session] {
 func mergeRuns(_ messages: [Message]) -> [Message] {
     var out: [Message] = []
     for m in messages {
-        if let last = out.last, last.role == m.role {
+        // A relayed message is its own turn — it is not the user talking.
+        if let last = out.last, last.role == m.role, last.from == m.from {
             out[out.count - 1] = Message(id: last.id, role: last.role,
-                                         text: last.text + "\n\n" + m.text, ts: last.ts)
+                                         text: last.text + "\n\n" + m.text, ts: last.ts,
+                                         from: last.from)
         } else {
             out.append(m)
         }
@@ -250,8 +292,12 @@ func readTranscript(path: String) -> Transcript {
            isRealUserText(text, isMeta: o["isMeta"] as? Bool ?? false) {
             fallbackTitle = text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        messages.append(Message(id: messages.count, role: role, text: text,
-                                ts: epoch(o["timestamp"])))
+        // The wrapper is stripped for display; the title check above still sees the
+        // original, so a relayed message never becomes a session title.
+        let unwrapped = parseCrossSession(text)
+        messages.append(Message(id: messages.count, role: role,
+                                text: unwrapped?.body ?? text,
+                                ts: epoch(o["timestamp"]), from: unwrapped?.peer))
     }
     return Transcript(title: titled(customTitle, fallbackTitle),
                       project: project ?? "(unknown)", messages: mergeRuns(messages))
@@ -321,6 +367,21 @@ final class Store {
         // Picking a completion puts that exact path in the box, which still matches
         // itself — offering it back is noise. Same for a path typed out in full.
         return hits == [term] ? [] : hits
+    }
+
+    /// Which session a relayed message came from, if it can be pinned down.
+    ///
+    /// The tag's `from` is a unix socket path (`uds:/tmp/cc-socks/36299.sock`) that
+    /// dies with the process, so the only durable handle is the peer's name — and
+    /// names are not unique: three sessions here are titled "sa-federated-design".
+    /// Prefer one that was running when the message arrived, then the one active
+    /// nearest to it. Ambiguity resolves to a best guess, never to a wrong-looking
+    /// certainty, so callers should treat this as a jump, not a citation.
+    func sender(_ peer: Peer, at ts: Double?) -> Session? {
+        let named = sessions.filter { $0.title == peer.name }
+        guard named.count > 1, let ts else { return named.first }
+        return named.first { $0.first <= ts && ts <= $0.last }
+            ?? named.min { abs($0.last - ts) < abs($1.last - ts) }
     }
 
     /// The command that picks a conversation back up in a terminal.
