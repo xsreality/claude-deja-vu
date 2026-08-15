@@ -286,16 +286,23 @@ func runSelftest() {
         try! (old + line).write(toFile: livePath, atomically: true, encoding: .utf8)
     }
 
+    // Pinned to a whole second: reading an mtime back and writing it again loses
+    // sub-second precision, which made this compare unequal at random.
+    let pinned = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 - 60).rounded())
+    func pin() {
+        try! FileManager.default.setAttributes([.modificationDate: pinned], ofItemAtPath: livePath)
+    }
+
     append("first")
+    pin()
     let cold = scanAll()
     assert(cold.sessions.count == 1 && cold.sessions[0].count == 1)
     assert(cold.cache.count == 1)
 
-    // Grow the file but pin its mtime back: the only way to tell a reused parse
+    // Grow the file but hold its mtime still: the only way to tell a reused parse
     // from a fresh one is to make the two disagree.
-    let mtime = try! FileManager.default.attributesOfItem(atPath: livePath)[.modificationDate]!
     append("second")
-    try! FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: livePath)
+    pin()
     assert(scanAll(cache: cold.cache).sessions[0].count == 1, "same mtime, cached parse reused")
 
     // And now for real, with the mtime the append actually produced.
