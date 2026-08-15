@@ -586,26 +586,60 @@ struct TranscriptView: View {
     /// Which session the messages on screen belong to, so a reload can tell a
     /// switch to another conversation from more text arriving in this one.
     @State private var loaded: Session.ID?
+    /// Whether the end of the transcript is on screen — what decides if a live
+    /// append should be followed.
+    @State private var atTail = true
+
+    private let tailAnchor = "tail"
+    private let scrollSpace = "transcript"
+
+    /// Changes whenever the tail does. The count alone is not enough: a turn that
+    /// is still being written grows in place, since consecutive parts merge into
+    /// one turn rather than arriving as new ones.
+    private var tailKey: String { "\(messages.count)-\(messages.last?.text.count ?? 0)" }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(messages) { m in
-                            MessageView(message: m, term: term, onOpen: onOpen).id(m.id)
+                GeometryReader { viewport in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(messages) { m in
+                                MessageView(message: m, term: term, onOpen: onOpen).id(m.id)
+                            }
+                            // Somewhere to scroll to, and the thing whose position
+                            // says whether the tail is on screen.
+                            Color.clear
+                                .frame(height: 1)
+                                .id(tailAnchor)
+                                .background(GeometryReader { tail in
+                                    Color.clear.preference(
+                                        key: TailDistance.self,
+                                        value: tail.frame(in: .named(scrollSpace)).maxY
+                                            - viewport.size.height)
+                                })
                         }
+                        .padding(.horizontal, 26)
+                        .padding(.bottom, 40)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(.horizontal, 26)
-                    .padding(.bottom, 40)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .coordinateSpace(name: scrollSpace)
+                    // Within a message or so of the end counts as "at the end" —
+                    // resting exactly on the last pixel is not something anyone does.
+                    .onPreferenceChange(TailDistance.self) { atTail = $0 < 120 }
                 }
                 // On arriving at a conversation, not on every live append — a
                 // transcript that yanked back to the search hit each time Claude
                 // typed another line would be unreadable.
                 .onChange(of: loaded) { scrollToFirstHit(proxy) }
+                // Follow a live conversation, but only from the bottom: if you have
+                // scrolled up to read something, new text must not drag you away.
+                .onChange(of: tailKey) {
+                    guard loaded == session.id, atTail else { return }
+                    withAnimation { proxy.scrollTo(tailAnchor, anchor: .bottom) }
+                }
             }
         }
         // Reloads when you pick another conversation, and again whenever this one
@@ -741,6 +775,13 @@ struct StatsLine: View {
         }
         return lines.joined(separator: "\n")
     }
+}
+
+/// How far past the bottom of the visible area the end of the transcript sits.
+/// Negative or small means the tail is on screen.
+private struct TailDistance: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 struct MessageView: View {
