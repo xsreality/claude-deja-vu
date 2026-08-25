@@ -47,7 +47,7 @@ struct ContentView: View {
             }
         }
         .onKeyPress(.escape) {
-            store.query = ""; store.selectedDay = nil; store.cluster = nil
+            store.query = ""; store.selectedDay = nil; store.cluster = nil; store.repo = nil
             return .handled
         }
     }
@@ -81,6 +81,8 @@ struct ContentView: View {
                 .labelsHidden()
                 .fixedSize()
                 .disabled(store.selectedDay != nil)
+
+                RepoMenu(repos: store.repoCounts, selected: $store.repo)
 
                 Spacer(minLength: 0)
 
@@ -125,7 +127,8 @@ struct ContentView: View {
                 Divider()
                 List(store.visible, selection: $selection) { s in
                     SessionRow(session: s, query: store.query,
-                               summary: store.summary(s), topics: store.topics(s))
+                               summary: store.summary(s), topics: store.topics(s),
+                               repo: store.repo(of: s), onRepo: { store.repo = $0 })
                         .tag(s.id)
                         .listRowInsets(EdgeInsets(top: 13, leading: 18, bottom: 13, trailing: 18))
                         .listRowSeparator(.visible)
@@ -151,8 +154,9 @@ struct ContentView: View {
     /// Says why the list is as short as it is — especially after picking a day.
     private var countLabel: String {
         let n = store.visible.count
+        let inRepo = store.repo.map { " in \(repoLabel($0))" } ?? ""
         let onDay = store.selectedDay.map { " on \(shortLabel($0))" } ?? ""
-        return "\(n) \(n == 1 ? "conversation" : "conversations")\(onDay)"
+        return "\(n) \(n == 1 ? "conversation" : "conversations")\(inRepo)\(onDay)"
     }
 
     /// `file:` queries match paths, not prose — nothing to highlight in the text.
@@ -163,6 +167,11 @@ struct ContentView: View {
     @ViewBuilder private var emptyState: some View {
         if store.loading {
             ContentUnavailableView("Scanning…", systemImage: "clock")
+        } else if let repo = store.repo {
+            // Before the search and day cases: with a repo picked, that is the filter
+            // most likely to be the reason, and the one least visible in the list.
+            ContentUnavailableView("Nothing in \(repoLabel(repo))", systemImage: "folder",
+                                   description: Text(repoEmptyReason))
         } else if !store.query.isEmpty {
             ContentUnavailableView.search(text: store.query)
         } else if store.selectedDay != nil {
@@ -170,6 +179,52 @@ struct ContentView: View {
         } else {
             ContentUnavailableView("No conversations", systemImage: "tray",
                                    description: Text("Nothing in \(store.scope.rawValue) under \(projectsDir)"))
+        }
+    }
+
+    /// Which of the other filters emptied the repo out — the thing to undo.
+    private var repoEmptyReason: String {
+        if !store.query.isEmpty { return "No conversation in this repo matches “\(store.query)”." }
+        if let day = store.selectedDay { return "Nothing in this repo on \(shortLabel(day))." }
+        return "Nothing in this repo in \(store.scope.rawValue) — try All repos."
+    }
+}
+
+/// The repos in the window, with counts. A menu rather than a chips row: two dozen
+/// of these would scroll four at a time, and the Topics row already owns that space.
+struct RepoMenu: View {
+    let repos: [(repo: String, count: Int)]
+    @Binding var selected: String?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Menu {
+                Button("All repos") { selected = nil }
+                Divider()
+                ForEach(repos, id: \.repo) { r in
+                    // A Toggle, so macOS draws the checkmark and clicking the picked
+                    // one turns it off — two ways back to all repos, both native.
+                    Toggle(isOn: Binding(get: { selected == r.repo },
+                                         set: { selected = $0 ? r.repo : nil })) {
+                        Text("\(repoLabel(r.repo))   \(r.count)")
+                    }
+                }
+            } label: {
+                Label(selected.map(repoLabel) ?? "All repos", systemImage: "folder")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help(selected ?? "Show one repository at a time")
+
+            if selected != nil {
+                Button { selected = nil } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Back to all repos")
+            }
         }
     }
 }
@@ -425,15 +480,26 @@ struct SessionRow: View {
     /// From the last cross-reference, when there has been one.
     var summary: String?
     var topics: [String] = []
+    /// The repo this conversation's working directory rolls up to.
+    var repo: String?
+    var onRepo: ((String) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Where and when, above the title — keeps the title line uncontested.
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(eyebrow)
-                    .font(.system(size: 11.5))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 0) {
+                    // Only the name is a button: the branch and the age half of this
+                    // line have to keep selecting the row.
+                    Button(repoLabel(repo ?? session.project)) { onRepo?(repo ?? session.project) }
+                        .buttonStyle(.plain)
+                        .help("Show only \(session.project)")
+                        .disabled(onRepo == nil)
+                    if let branch = session.branch { Text(" · \(branch)") }
+                }
+                .font(.system(size: 11.5))
+                .lineLimit(1)
+                .truncationMode(.middle)
                 Spacer(minLength: 0)
                 Text("\(age(session.last)) · \(session.count)")
                     .font(.system(size: 10, design: .monospaced))
@@ -498,11 +564,6 @@ struct SessionRow: View {
                     .padding(.top, 7)
             }
         }
-    }
-
-    private var eyebrow: String {
-        let project = (session.project as NSString).lastPathComponent
-        return session.branch.map { "\(project) · \($0)" } ?? project
     }
 
     /// A text match shows its context; a `file:` match shows which paths hit.

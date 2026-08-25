@@ -85,6 +85,50 @@ func highlighted(_ s: String, _ term: String?) -> AttributedString {
     highlighting(AttributedString(s), term)
 }
 
+// --- repos -------------------------------------------------------------------
+
+/// Each working directory mapped to the repo it belongs to: the shallowest other
+/// directory in the set that contains it, or itself.
+///
+/// One repo turns up as many working directories — a git worktree under
+/// `.claude/worktrees/`, a source subdirectory you happened to be in, an openspec
+/// change dir. All of them sit under the repo on disk, so plain path text groups
+/// them, and unlike walking up to a `.git` it stays right for a directory that has
+/// since moved and works for a folder that was never a repo at all.
+///
+/// ponytail: quadratic over *distinct* directories — 34 of them here, once per
+/// scan. A sorted-prefix walk only if that ever reaches thousands.
+func repos(_ cwds: some Sequence<String>) -> [String: String] {
+    let all = Set(cwds)
+    // Shallowest wins, so /x/repo, /x/repo/a and /x/repo/a/b are one repo rather
+    // than two. The trailing slash is what keeps /x/repo-two out of /x/repo.
+    return Dictionary(uniqueKeysWithValues: all.map { cwd in
+        (cwd, all.filter { cwd.hasPrefix($0 + "/") }.min { $0.count < $1.count } ?? cwd)
+    })
+}
+
+/// Every repo these conversations belong to with how many it holds, largest first,
+/// alongside the working-directory map they were grouped by.
+///
+/// `keeping` is listed even when it holds nothing: the window slides, so the repo
+/// someone picked can empty out under them, and it has to stay clickable.
+func repoTally(_ sessions: [Session], keeping picked: String? = nil)
+    -> (map: [String: String], counts: [(repo: String, count: Int)]) {
+    let map = repos(sessions.map(\.project))
+    var counts: [String: Int] = [:]
+    for s in sessions { counts[map[s.project] ?? s.project, default: 0] += 1 }
+    if let picked, counts[picked] == nil { counts[picked] = 0 }
+    return (map, counts
+        .sorted { $0.value > $1.value || ($0.value == $1.value && $0.key < $1.key) }
+        .map { (repo: $0.key, count: $0.value) })
+}
+
+/// A path as it reads in the UI: the last component, which is what anyone calls
+/// the repo. The full path lives in the tooltip.
+func repoLabel(_ path: String) -> String {
+    (path as NSString).lastPathComponent
+}
+
 // --- activity strip ----------------------------------------------------------
 
 struct DayBucket: Identifiable {

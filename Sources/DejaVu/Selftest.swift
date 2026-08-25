@@ -188,6 +188,40 @@ func runSelftest() {
     assert(completeFiles([fs], "dash.py") == ["/a/dash.py", "/a/deep/nested/dash.py",
                                               "/dash.py/other.txt"])
 
+    // --- repos ---
+    // The real shapes this has to get right, from ~/.claude/projects: a source
+    // subdirectory, a git worktree living under its own repo, and two repos that
+    // share a name prefix.
+    let cwds = ["/x/repo", "/x/repo/platform/src/main",
+                "/x/repo/.claude/worktrees/feature", "/x/repo-two", "/y/lone/deep"]
+    let map = repos(cwds)
+    assert(map["/x/repo"] == "/x/repo")
+    assert(map["/x/repo/platform/src/main"] == "/x/repo", "a subdirectory folds in")
+    assert(map["/x/repo/.claude/worktrees/feature"] == "/x/repo", "a worktree folds in")
+    assert(map["/x/repo-two"] == "/x/repo-two", "a shared name prefix is not an ancestor")
+    assert(map["/y/lone/deep"] == "/y/lone/deep", "no ancestor present, so it is its own repo")
+
+    // Counting rolls the subdirectory up with its repo, and keeps a picked repo
+    // listed once the window has slid past it.
+    func at(_ cwd: String) -> Session {
+        Session(id: cwd, path: "", title: "", project: cwd, branch: nil, first: 0, last: 0,
+                count: 1, blob: "", files: [], peers: [], blobLower: "")
+    }
+    let tally = repoTally([at("/x/repo"), at("/x/repo/a"), at("/x/repo/a"), at("/x/other")])
+    assert(tally.counts.map(\.repo) == ["/x/repo", "/x/other"], "largest first")
+    assert(tally.counts.first!.count == 3, "the subdirectory counts towards its repo")
+    assert(tally.map["/x/repo/a"] == "/x/repo")
+    let kept = repoTally([at("/x/other")], keeping: "/x/gone").counts
+    assert(kept.map(\.repo) == ["/x/other", "/x/gone"] && kept.map(\.count) == [1, 0],
+           "a picked repo with nothing left stays listed, last")
+
+    // A chain collapses to the shallowest, not to the nearest parent.
+    let chain = repos(["/x/repo", "/x/repo/a", "/x/repo/a/b"])
+    assert(chain["/x/repo/a/b"] == "/x/repo" && chain["/x/repo/a"] == "/x/repo")
+
+    assert(repos([String]()).isEmpty)
+    assert(repoLabel("/x/repo/a") == "a" && repoLabel("(unknown)") == "(unknown)")
+
     let now = Date().timeIntervalSince1970
     let recent = Session(id: "r", path: "", title: "", project: "/w/proj", branch: nil,
                          first: now, last: now, count: 7, blob: "", files: [], peers: [],
@@ -336,6 +370,17 @@ func runSelftest() {
     append("third")
     let warm = scanAll(cache: cold.cache)
     assert(warm.sessions[0].count == 3, "a changed file is re-parsed, not served stale")
+
+    // A short window is how a cold start gets rows up fast: same walk, but files
+    // whose activity is older than the window never get parsed.
+    let stalePath = live + "/ffffffff-1111-2222-3333-444444444444.jsonl"
+    let staleStamp = ISO8601DateFormatter().string(from: Date(timeIntervalSinceNow: -10 * 86400))
+    try! (#"{"type":"user","message":{"role":"user","content":"old news"},"timestamp":"\#(staleStamp)"}"#)
+        .write(toFile: stalePath, atomically: true, encoding: .utf8)
+    assert(scanAll().sessions.count == 2, "the full window holds both")
+    assert(scanAll(window: 48 * 3600).sessions.map(\.id) == ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
+           "a 48h window leaves the 10-day-old session out")
+    try! FileManager.default.removeItem(atPath: stalePath)
 
     try! FileManager.default.removeItem(atPath: livePath)
     assert(scanAll(cache: warm.cache).sessions.isEmpty, "a deleted file leaves the cache")

@@ -259,17 +259,18 @@ struct ScannedFile {
     let session: Session?
 }
 
-/// Parsed sessions active within the last 4 weeks, newest activity first, plus
-/// what to hand back as `cache` next time.
+/// Parsed sessions active within the last 4 weeks — or a shorter `window` — newest
+/// activity first, plus what to hand back as `cache` next time.
 ///
 /// Reusing unchanged files matters once the watcher is running: a live
 /// conversation appends every few seconds, and a full parse of the window takes
 /// about as long as the gap between writes. With the cache a rescan re-reads only
 /// the file that actually changed.
-func scanAll(cache: [String: ScannedFile] = [:]) -> (sessions: [Session], cache: [String: ScannedFile]) {
+func scanAll(cache: [String: ScannedFile] = [:], window: Double = windowSeconds)
+    -> (sessions: [Session], cache: [String: ScannedFile]) {
     let fm = FileManager.default
     guard let walk = fm.enumerator(atPath: projectsDir) else { return ([], [:]) }
-    let cutoff = Date().timeIntervalSince1970 - windowSeconds
+    let cutoff = Date().timeIntervalSince1970 - window
 
     var sessions: [Session] = []
     var scanned: [String: ScannedFile] = [:]
@@ -400,6 +401,12 @@ final class Store {
     var scope: Scope = .h48
     /// A day picked off the activity strip (yyyy-MM-dd), or nil.
     var selectedDay: String?
+    /// The repo picked from the header menu (a full path), or nil for all of them.
+    /// Seeded like DEJAVU_QUERY, so the narrowed state can be opened and looked at
+    /// without a click — the menu needs one, and screenshots can't give it.
+    var repo: String? = ProcessInfo.processInfo.environment["DEJAVU_REPO"] {
+        didSet { recompute() }
+    }
     /// A topic chip picked from the cross-reference results, or nil.
     var cluster: String?
 
@@ -412,6 +419,16 @@ final class Store {
     var analyzing = false
     /// What the last cross-reference run had to say, shown next to the button.
     var status: String?
+
+    /// Which repo each working directory belongs to. Rebuilt per scan rather than
+    /// parsed into `Session`: a session's repo depends on the *other* directories in
+    /// the window, and sessions are cached per file across scans, so a new directory
+    /// would leave a stale repo on every file that didn't change.
+    private var repoOf: [String: String] = [:]
+    /// Every repo in the window with how many conversations it holds, largest first.
+    /// Counted over the whole window rather than the current query, so the menu
+    /// doesn't renumber itself on every keystroke.
+    private(set) var repoCounts: [(repo: String, count: Int)] = []
 
     /// Sessions matching the query, before the scope narrows them. Stored rather
     /// than computed: scanning 4MB of text on every view update would show.
@@ -439,11 +456,23 @@ final class Store {
         guard !scanning else { return rescanWhenDone = true }
         scanning = true
         if !quiet { loading = true }
+
+        // A cold start opens on 48h, but reaching that through the whole window is
+        // 183MB of parsing for the 18MB the first screen actually shows. Do the
+        // recent files first, so there are rows to read in a fraction of a second,
+        // then fill the rest of the window in behind them — the second pass reuses
+        // the first one's parses through the cache, so nothing is read twice.
+        //
+        // Cold start only: a warm rescan is already cheap, and narrowing `sessions`
+        // to 48h on the way through would blink live rows out of the list.
+        if scanCache.isEmpty {
+            apply(await Task.detached(priority: .userInitiated) {
+                scanAll(window: Scope.h48.seconds)
+            }.value)
+        }
+
         let cache = scanCache
-        let scan = await Task.detached(priority: .userInitiated) { scanAll(cache: cache) }.value
-        sessions = scan.sessions
-        scanCache = scan.cache
-        recompute()
+        apply(await Task.detached(priority: .userInitiated) { scanAll(cache: cache) }.value)
         loading = false
         scanning = false
         startWatching()
@@ -451,6 +480,15 @@ final class Store {
             rescanWhenDone = false
             await refresh(quiet: true)
         }
+    }
+
+    /// Publish a scan's results. Called twice on a cold start, once after that.
+    @MainActor
+    private func apply(_ scan: (sessions: [Session], cache: [String: ScannedFile])) {
+        sessions = scan.sessions
+        scanCache = scan.cache
+        rebuildRepos()
+        recompute()
     }
 
     /// Follow the log directory so an active conversation appears as it happens.
@@ -482,16 +520,25 @@ final class Store {
 
     func summary(_ s: Session) -> String? { insights?.summaries[s.id] }
     func topics(_ s: Session) -> [String] { labels[s.id] ?? [] }
+    func repo(of s: Session) -> String { repoOf[s.project] ?? s.project }
+
+    private func rebuildRepos() {
+        (repoOf, repoCounts) = repoTally(sessions, keeping: repo)
+    }
 
     private func recompute() {
+        // The repo narrows here, beside the query, not further down with the scope:
+        // `days` and the topic counts both come off `matched`, so picking a repo
+        // turns the activity strip into that repo's history instead of leaving it
+        // showing everything.
+        var rows = repo.map { r in sessions.filter { repo(of: $0) == r } } ?? sessions
         if let term = fileTerm(query) {
-            matched = sessions.filter { !matchingFiles($0, term).isEmpty }
+            rows = rows.filter { !matchingFiles($0, term).isEmpty }
         } else if !query.isEmpty {
             let q = query.lowercased()
-            matched = sessions.filter { $0.blobLower.contains(q) }
-        } else {
-            matched = sessions
+            rows = rows.filter { $0.blobLower.contains(q) }
         }
+        matched = rows
         days = dayHistogram(matched)
         // A day that survived the last query may hold nothing now.
         if let d = selectedDay, !days.contains(where: { $0.day == d && $0.sessions > 0 }) {
