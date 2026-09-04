@@ -32,19 +32,15 @@ If you run Claude Code across many terminals and repos, related discussions end 
 ### The Mac app (Homebrew)
 
 ```bash
+brew trust xsreality/tap
 brew install xsreality/tap/claude-deja-vu
-dejavu
 ```
 
-Builds from source — you need the Xcode command line tools (`xcode-select --install`). To keep the app in Launchpad:
-
-```bash
-ln -s "$(brew --prefix claude-deja-vu)/DejaVu.app" ~/Applications/
-```
+This installs `DejaVu.app` into `/Applications`, so Spotlight and Launchpad find it like any other app. The app is ad-hoc signed rather than notarised, so the **first** launch needs **System Settings → Privacy & Security → Open Anyway**.
 
 ### The Mac app (download)
 
-Grab `ClaudeDejaVu-*.dmg` from the [latest release](https://github.com/xsreality/claude-deja-vu/releases/latest) and drag the app to Applications. The app is ad-hoc signed rather than notarised, so the first launch needs **System Settings → Privacy & Security → Open Anyway**. Homebrew above avoids that step.
+Grab `ClaudeDejaVu-*.dmg` from the [latest release](https://github.com/xsreality/claude-deja-vu/releases/latest) and drag the app to Applications. Same ad-hoc signature, so the same one-time **Open Anyway** step applies.
 
 ### The Python viewer (any platform)
 
