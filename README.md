@@ -42,6 +42,10 @@ Builds from source — you need the Xcode command line tools (`xcode-select --in
 ln -s "$(brew --prefix claude-deja-vu)/DejaVu.app" ~/Applications/
 ```
 
+### The Mac app (download)
+
+Grab `ClaudeDejaVu-*.dmg` from the [latest release](https://github.com/xsreality/claude-deja-vu/releases/latest) and drag the app to Applications. The app is ad-hoc signed rather than notarised, so the first launch needs **System Settings → Privacy & Security → Open Anyway**. Homebrew above avoids that step.
+
 ### The Python viewer (any platform)
 
 ```bash
