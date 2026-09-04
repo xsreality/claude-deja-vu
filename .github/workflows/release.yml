@@ -1,0 +1,75 @@
+name: Release
+
+# Tag-driven: `git tag v0.1.2 && git push origin v0.1.2` builds the DMG, signs a
+# provenance attestation for it, and publishes the release. Running this workflow
+# by hand builds and attests without releasing, which is a useful dry run.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# No token at all by default; each job asks for exactly what it needs.
+permissions: {}
+
+jobs:
+  release:
+    runs-on: macos-15
+    permissions:
+      contents: write      # create the release, upload the DMG
+      id-token: write      # OIDC identity that Sigstore signs the provenance with
+      attestations: write  # store the attestation alongside the repository
+    steps:
+      # Third-party code is pinned to a commit, never a tag: a tag can be moved,
+      # a commit cannot.
+      - name: Check out
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Assert the tag matches VERSION
+        if: github.ref_type == 'tag'
+        run: |
+          want="$(cat VERSION)"
+          got="${GITHUB_REF_NAME#v}"
+          [ "$want" = "$got" ] || { echo "tag $GITHUB_REF_NAME but VERSION says $want"; exit 1; }
+
+      - name: Selftest
+        run: swift run DejaVu --selftest
+
+      - name: Build the DMG
+        run: ./Scripts/make-dmg.sh
+
+      - name: Checksums
+        run: |
+          cd build
+          shasum -a 256 ClaudeDejaVu-*.dmg | tee SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: build/ClaudeDejaVu-*.dmg
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" build/ClaudeDejaVu-*.dmg build/SHA256SUMS \
+            --title "Claude Deja Vu ${TAG#v}" \
+            --notes "One searchable view of your Claude Code conversations.
+
+          ## Install
+
+              brew trust xsreality/tap
+              brew install xsreality/tap/claude-deja-vu
+
+          Or download the DMG below and drag the app to Applications. It is ad-hoc
+          signed rather than notarised, so the first launch needs System Settings >
+          Privacy & Security > \"Open Anyway\".
+
+          ## Verify what you downloaded
+
+              gh attestation verify ClaudeDejaVu-${TAG#v}.dmg --repo ${{ github.repository }}
+
+          Requires macOS 14 or newer."

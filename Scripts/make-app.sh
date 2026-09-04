@@ -5,6 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP="build/DejaVu.app"
+VERSION="$(cat VERSION)"   # single source of truth; the release workflow asserts the tag matches
 # --disable-sandbox: SwiftPM sandboxes its own manifest compile, which cannot nest
 # inside the Homebrew build sandbox. Nothing here needs SwiftPM's sandbox.
 swift build -c release --disable-sandbox
@@ -13,7 +14,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c release --disable-sandbox --show-bin-path)/DejaVu" "$APP/Contents/MacOS/DejaVu"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -24,7 +25,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIconFile</key>          <string>AppIcon</string>
   <key>CFBundleIdentifier</key>        <string>dev.xsreality.dejavu</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.1</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key>    <string>14.0</string>
   <key>NSHighResolutionCapable</key>   <true/>
 </dict>
