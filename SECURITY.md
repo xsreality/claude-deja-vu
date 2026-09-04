@@ -28,7 +28,9 @@ Every release is built by
 runner and carries a Sigstore-signed build provenance attestation:
 
 ```bash
-gh attestation verify ClaudeDejaVu-0.1.2.dmg --repo xsreality/claude-deja-vu
+gh attestation verify ClaudeDejaVu-0.1.2.dmg \
+  --repo xsreality/claude-deja-vu \
+  --signer-workflow xsreality/claude-deja-vu/.github/workflows/release.yml
 ```
 
 That proves which repository, commit and workflow produced the exact bytes you
