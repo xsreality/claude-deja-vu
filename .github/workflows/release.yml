@@ -70,6 +70,8 @@ jobs:
 
           ## Verify what you downloaded
 
-              gh attestation verify ClaudeDejaVu-${TAG#v}.dmg --repo ${{ github.repository }}
+              gh attestation verify ClaudeDejaVu-${TAG#v}.dmg \\
+                --repo ${{ github.repository }} \\
+                --signer-workflow ${{ github.repository }}/.github/workflows/release.yml
 
           Requires macOS 14 or newer."
