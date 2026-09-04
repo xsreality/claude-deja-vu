@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Claude Deja Vu.
+       The conversation in front of you, and the same shape stacked behind it,
+       fading into the ground: the ones you have already had. Three beats, not
+       two - two shapes read as "two people talking", three read as "again".
+       Only the live conversation carries a tail; the echoes are the same
+       silhouette without one, which keeps the small sizes clean. -->
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c04a32"/>
+      <stop offset="1" stop-color="#9a3323"/>
+    </linearGradient>
+    <rect id="echo" width="340" height="216" rx="52"/>
+    <path id="bubble" d="M 52,0 H 288 A 52,52 0 0 1 340,52 V 164
+                         A 52,52 0 0 1 288,216 H 196 L 106,276 L 134,216
+                         H 52 A 52,52 0 0 1 0,164 V 52 A 52,52 0 0 1 52,0 Z"/>
+  </defs>
+
+  <!-- ponytail: rounded rect at Apple's radius, not a true superellipse. Close
+       enough at every size a dock renders; swap if it ever looks off. -->
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#ground)"/>
+
+  <g transform="translate(197 250) scale(1.05)">
+    <use href="#echo" fill="#cf6a4f"/>
+    <use href="#echo" transform="translate(130 104)" fill="#e8927a"/>
+    <use href="#bubble" transform="translate(260 208)" fill="#fbfaf8"/>
+  </g>
+</svg>
