@@ -1,5 +1,7 @@
 # Claude Déjà Vu
 
+**[xsreality.github.io/claude-deja-vu](https://xsreality.github.io/claude-deja-vu/)**
+
 Find that conversation you had with Claude Code, the one you can't remember which project it was in.
 
 If you run Claude Code across many terminals and repos, related discussions end up scattered. Claude Déjà Vu reads the session logs Claude Code already writes to `~/.claude/projects/` and gives you one searchable view of them: browse recent conversations, search every message across every project, find the conversation that touched a given file, read the full transcript, and optionally let Claude group related conversations into topics that span repos.
