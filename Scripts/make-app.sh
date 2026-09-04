@@ -5,10 +5,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP="build/DejaVu.app"
-swift build -c release
+# --disable-sandbox: SwiftPM sandboxes its own manifest compile, which cannot nest
+# inside the Homebrew build sandbox. Nothing here needs SwiftPM's sandbox.
+swift build -c release --disable-sandbox
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$(swift build -c release --show-bin-path)/DejaVu" "$APP/Contents/MacOS/DejaVu"
+cp "$(swift build -c release --disable-sandbox --show-bin-path)/DejaVu" "$APP/Contents/MacOS/DejaVu"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
