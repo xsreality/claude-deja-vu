@@ -29,6 +29,21 @@ If you run Claude Code across many terminals and repos, related discussions end 
 
 ## Getting started
 
+### The Mac app (Homebrew)
+
+```bash
+brew install xsreality/tap/claude-deja-vu
+dejavu
+```
+
+Builds from source — you need the Xcode command line tools (`xcode-select --install`). To keep the app in Launchpad:
+
+```bash
+ln -s "$(brew --prefix claude-deja-vu)/DejaVu.app" ~/Applications/
+```
+
+### The Python viewer (any platform)
+
 ```bash
 git clone https://github.com/xsreality/claude-deja-vu.git
 cd claude-deja-vu
