@@ -11,6 +11,7 @@ swift build -c release --disable-sandbox
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c release --disable-sandbox --show-bin-path)/DejaVu" "$APP/Contents/MacOS/DejaVu"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -20,6 +21,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key>              <string>Claude Deja Vu</string>
   <key>CFBundleDisplayName</key>       <string>Claude Déjà Vu</string>
   <key>CFBundleExecutable</key>        <string>DejaVu</string>
+  <key>CFBundleIconFile</key>          <string>AppIcon</string>
   <key>CFBundleIdentifier</key>        <string>dev.xsreality.dejavu</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.1</string>
