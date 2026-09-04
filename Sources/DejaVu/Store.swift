@@ -1,6 +1,6 @@
 import Foundation
 
-// Port of dashboard.py's parsing layer. Same shapes, same fallbacks — the two
+// Port of dashboard.py's parsing layer. Same shapes, same fallbacks: the two
 // implementations are meant to agree on what a session is.
 
 let projectsDir: String = ProcessInfo.processInfo.environment["DEJAVU_PROJECTS_DIR"]
@@ -85,7 +85,7 @@ func parseCrossSession(_ text: String) -> (peer: Peer, body: String)? {
 /// numbers only one session ever shows.
 struct Stats {
     /// Every model that answered, in the order they first appear. Sessions do mix
-    /// them — a model switch mid-conversation is one file with two names in it.
+    /// them, since a model switch mid-conversation is one file with two names in it.
     var models: [String] = []
     /// Everything sent, cached or not: what the conversation cost to keep going.
     var input = 0
@@ -164,7 +164,7 @@ func isRealUserText(_ text: String, isMeta: Bool) -> Bool {
 }
 
 /// Decoded JSONL lines. Invalid UTF-8 is replaced rather than fatal, and a
-/// malformed line is skipped — a live session's last line is often half-written.
+/// malformed line is skipped, because a live session's last line is often half-written.
 private func jsonLines(_ path: String) -> [[String: Any]] {
     guard let data = FileManager.default.contents(atPath: path) else { return [] }
     return String(decoding: data, as: UTF8.self)
@@ -226,13 +226,13 @@ func parseSession(path: String) -> Session? {
 
     guard count > 0, let last = lastTS else { return nil }
 
-    // Nothing but slash commands — `/model`, `/clear` — leaves a session with no
+    // Nothing but slash commands (`/model`, `/clear`) leaves a session with no
     // prose from you and no reply from Claude. That is not a conversation, so it
     // stays out of the list.
     //
     // Assistant output is what saves a command-launched session: `/opsx:explore`
     // and friends also produce no "real" user text, but they do real work. A
-    // custom title is a second reprieve — naming a session is deliberate.
+    // custom title is a second reprieve, because naming a session is deliberate.
     guard fallbackTitle != nil || sawAssistantText || customTitle != nil else { return nil }
 
     let blob = blobParts.joined(separator: "\n")
@@ -253,13 +253,13 @@ func parseSession(path: String) -> Session? {
 }
 
 /// What a previous scan made of one file. `session` is nil for a file that parsed
-/// to nothing — worth remembering, so it isn't re-parsed on every pass.
+/// to nothing, which is worth remembering so it isn't re-parsed on every pass.
 struct ScannedFile {
     let mtime: Double
     let session: Session?
 }
 
-/// Parsed sessions active within the last 4 weeks — or a shorter `window` — newest
+/// Parsed sessions active within the last 4 weeks (or a shorter `window`), newest
 /// activity first, plus what to hand back as `cache` next time.
 ///
 /// Reusing unchanged files matters once the watcher is running: a live
@@ -290,7 +290,7 @@ func scanAll(cache: [String: ScannedFile] = [:], window: Double = windowSeconds)
 
 /// Collapse consecutive messages from the same speaker into one turn.
 ///
-/// A single assistant turn that used tools is written as several entries — one per
+/// A single assistant turn that used tools is written as several entries, one per
 /// step. Once the tool calls are dropped and only the text kept, that turn arrives
 /// as a run of short messages, each carrying its own "Claude" header. Rendering the
 /// run as one turn removes the repeated labels; the parts stay separate paragraphs.
@@ -298,7 +298,7 @@ func scanAll(cache: [String: ScannedFile] = [:], window: Double = windowSeconds)
 func mergeRuns(_ messages: [Message]) -> [Message] {
     var out: [Message] = []
     for m in messages {
-        // A relayed message is its own turn — it is not the user talking.
+        // A relayed message is its own turn: it is not the user talking.
         if let last = out.last, last.role == m.role, last.from == m.from {
             out[out.count - 1] = Message(id: last.id, role: last.role,
                                          text: last.text + "\n\n" + m.text, ts: last.ts,
@@ -342,7 +342,7 @@ func readTranscript(path: String) -> Transcript {
         }
         if let usage = msg["usage"] as? [String: Any] {
             // Cache reads are the bulk of it, and they are still tokens that went
-            // to the model — one "in" number, broken out in the tooltip.
+            // to the model: one "in" number, broken out in the tooltip.
             for key in ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"] {
                 stats.input += usage[key] as? Int ?? 0
             }
@@ -403,7 +403,7 @@ final class Store {
     var selectedDay: String?
     /// The repo picked from the header menu (a full path), or nil for all of them.
     /// Seeded like DEJAVU_QUERY, so the narrowed state can be opened and looked at
-    /// without a click — the menu needs one, and screenshots can't give it.
+    /// without a click, which the menu needs and screenshots can't give it.
     var repo: String? = ProcessInfo.processInfo.environment["DEJAVU_REPO"] {
         didSet { recompute() }
     }
@@ -451,7 +451,7 @@ final class Store {
     /// seconds, and a spinner blinking on every one of those reads as breakage.
     @MainActor
     func refresh(quiet: Bool = false) async {
-        // Writes that land mid-scan don't start a second one — they queue a single
+        // Writes that land mid-scan don't start a second one; they queue a single
         // repeat, so a burst can't stack up scans but also can't be lost.
         guard !scanning else { return rescanWhenDone = true }
         scanning = true
@@ -460,7 +460,7 @@ final class Store {
         // A cold start opens on 48h, but reaching that through the whole window is
         // 183MB of parsing for the 18MB the first screen actually shows. Do the
         // recent files first, so there are rows to read in a fraction of a second,
-        // then fill the rest of the window in behind them — the second pass reuses
+        // then fill the rest of the window in behind them. The second pass reuses
         // the first one's parses through the cache, so nothing is read twice.
         //
         // Cold start only: a warm rescan is already cheap, and narrowing `sessions`
@@ -513,7 +513,7 @@ final class Store {
             }.value
             status = "Cross-referenced."
         } catch {
-            status = "Couldn’t reach Claude — \(error.localizedDescription)"
+            status = "Couldn’t reach Claude: \(error.localizedDescription)"
         }
         analyzing = false
     }
@@ -546,7 +546,7 @@ final class Store {
         }
     }
 
-    /// Matches narrowed to the selected day, or to the scope — before topics.
+    /// Matches narrowed to the selected day, or to the scope, before topics.
     private var inRange: [Session] {
         if let day = selectedDay {
             return matched.filter { dayKey($0.last) == day }
@@ -577,14 +577,14 @@ final class Store {
         guard let term = fileTerm(query), !term.isEmpty else { return [] }
         let hits = completeFiles(visible, term)
         // Picking a completion puts that exact path in the box, which still matches
-        // itself — offering it back is noise. Same for a path typed out in full.
+        // itself, so offering it back is noise. Same for a path typed out in full.
         return hits == [term] ? [] : hits
     }
 
     /// Which session a relayed message came from, if it can be pinned down.
     ///
     /// The tag's `from` is a unix socket path (`uds:/tmp/cc-socks/36299.sock`) that
-    /// dies with the process, so the only durable handle is the peer's name — and
+    /// dies with the process, so the only durable handle is the peer's name, and
     /// names are not unique: three sessions here are titled "sa-federated-design".
     /// Prefer one that was running when the message arrived, then the one active
     /// nearest to it. Ambiguity resolves to a best guess, never to a wrong-looking

@@ -1,6 +1,6 @@
 # Claude Déjà Vu
 
-Find that conversation you had with Claude Code — the one you can't remember which project it was in.
+Find that conversation you had with Claude Code, the one you can't remember which project it was in.
 
 If you run Claude Code across many terminals and repos, related discussions end up scattered. Claude Déjà Vu reads the session logs Claude Code already writes to `~/.claude/projects/` and gives you one searchable view of them: browse recent conversations, search every message across every project, find the conversation that touched a given file, read the full transcript, and optionally let Claude group related conversations into topics that span repos.
 
@@ -13,9 +13,9 @@ If you run Claude Code across many terminals and repos, related discussions end 
 - **See what you've been working on.** Conversations from the last 4 weeks, newest first, with the project, git branch, age, and message count.
 - **Search everything.** One box searches the full text of every message in every conversation. Results show a snippet with the match in context, so you can tell which conversation is the one you want.
 - **Find the conversation that touched a file.** Type `file:` and a path fragment. Completions appear as you type, and the results are the conversations where Claude read or edited that file.
-- **See when it happened.** An activity strip shows one bar per day across the whole 4-week window. Click a day to filter the list to it. When you search, the strip narrows to days with matches — so it answers "which week was that?" before you start scrolling.
+- **See when it happened.** An activity strip shows one bar per day across the whole 4-week window. Click a day to filter the list to it. When you search, the strip narrows to days with matches, so it answers "which week was that?" before you start scrolling.
 - **Jump straight to the match.** Open a search result and the transcript scrolls to the first hit, with every occurrence highlighted.
-- **Read comfortably.** Transcripts render markdown — headings, lists, tables, and code blocks — instead of a wall of raw text.
+- **Read comfortably.** Transcripts render markdown (headings, lists, tables, and code blocks) instead of a wall of raw text.
 - **See what a conversation was made of.** Each transcript header carries the model, how long it ran, the message count, and the files and tools it touched.
 - **Follow along live.** The open transcript updates as the conversation continues in your terminal.
 - **Resume where you left off.** One click copies the `cd … && claude --resume …` command for the conversation you're reading.
@@ -27,7 +27,7 @@ If you run Claude Code across many terminals and repos, related discussions end 
 
 - macOS 14 (Sonoma) or newer
 - Claude Code, with some existing session history
-- The `claude` CLI on your `PATH` — **only** if you want the Cross-reference feature
+- The `claude` CLI on your `PATH`, **only** if you want the Cross-reference feature
 
 ## Install
 
@@ -46,15 +46,15 @@ Either way, the app is signed ad-hoc rather than notarised by Apple, so macOS as
 
 **Browsing.** The app opens showing the last 48 hours. Switch to **7 days** or **All** (the full 4-week window) with the buttons in the top bar. Click any conversation on the left to read it on the right.
 
-**Searching.** Type in the search box. The list narrows to conversations containing your term, each showing a snippet of the match. The time range applies to search too — start with **48h** for something recent, widen to **All** when you're digging.
+**Searching.** Type in the search box. The list narrows to conversations containing your term, each showing a snippet of the match. The time range applies to search too: start with **48h** for something recent, widen to **All** when you're digging.
 
-**The activity strip.** Under the search box, one bar per day for the last 4 weeks, sized by how many messages that day held. Hover a bar for the date, the conversation and message counts, and which projects the day went to. Click one to see only that day — the range switches to **All** so the day is reachable whatever you were looking at, and clicking again clears it. The strip always covers the full window, not the selected range, so a spike three weeks back is still visible while you're browsing the last 48 hours. It reflects your search: with a term in the box, only days containing matches have bars.
+**The activity strip.** Under the search box, one bar per day for the last 4 weeks, sized by how many messages that day held. Hover a bar for the date, the conversation and message counts, and which projects the day went to. Click one to see only that day, and the range switches to **All** so the day is reachable whatever you were looking at, and clicking again clears it. The strip always covers the full window, not the selected range, so a spike three weeks back is still visible while you're browsing the last 48 hours. It reflects your search: with a term in the box, only days containing matches have bars.
 
-**Searching by file.** Start the search with `file:` to search paths instead of prose — `file:CartDrawer.tsx`. A list of matching files drops down as you type; pick one with the arrow keys or the mouse to narrow to the conversations that touched exactly that file. Each result shows which paths matched. Only files Claude actually read or wrote are indexed, so this finds work, not directory listings.
+**Searching by file.** Start the search with `file:` to search paths instead of prose, as in `file:CartDrawer.tsx`. A list of matching files drops down as you type; pick one with the arrow keys or the mouse to narrow to the conversations that touched exactly that file. Each result shows which paths matched. Only files Claude actually read or wrote are indexed, so this finds work, not directory listings.
 
-**One repo at a time.** The repo menu in the top bar narrows the whole view — list, search, and activity strip — to a single project.
+**One repo at a time.** The repo menu in the top bar narrows the whole view (list, search, and activity strip) to a single project.
 
-**Picking it back up.** Every open conversation has a **Resume** button. It copies `cd <project> && claude --resume <id>` — paste it into a terminal to carry on where you left off.
+**Picking it back up.** Every open conversation has a **Resume** button. It copies `cd <project> && claude --resume <id>`. Paste it into a terminal to carry on where you left off.
 
 **Cross-reference.** Click **Cross-reference** to have Claude read your recent conversations and group them. It takes about a minute and calls the `claude` CLI once. When it finishes:
 
@@ -84,7 +84,7 @@ That verifies, against Sigstore's public transparency log, which commit and whic
 
 The release also carries `SHA256SUMS`, and the cask pins the DMG's SHA-256, so Homebrew refuses a download whose bytes don't match.
 
-What this does **not** give you is Apple notarisation — that needs a paid Apple Developer account, so the one-time "Open Anyway" step stays. If you'd rather run only code you compiled yourself, build from source below; the app has no third-party dependencies.
+What this does **not** give you is Apple notarisation, which needs a paid Apple Developer account, so the one-time "Open Anyway" step stays. If you'd rather run only code you compiled yourself, build from source below; the app has no third-party dependencies.
 
 To report a security problem, see [SECURITY.md](SECURITY.md).
 
@@ -97,7 +97,7 @@ swift run DejaVu --selftest      # assert the parsing layer
 ./Scripts/make-icon.sh           # regenerate the icon from Resources/icon.svg
 ```
 
-`swift build` is enough on its own; `make-app.sh` only wraps the binary in a `.app` so it gets a dock icon and a double-click launch. There are no third-party dependencies, and no Xcode project — the Xcode command line tools are all you need.
+`swift build` is enough on its own; `make-app.sh` only wraps the binary in a `.app` so it gets a dock icon and a double-click launch. There are no third-party dependencies, and no Xcode project. The Xcode command line tools are all you need.
 
 Two environment variables point the app somewhere other than your live logs, which is how the screenshots above are taken:
 

@@ -64,7 +64,7 @@ struct ContentView: View {
                     // Floats over the strip below rather than pushing it down.
                     .overlay(alignment: .topLeading) {
                         // Only while the box has focus, like the web version's
-                        // activeElement check — clicking a result should close it.
+                        // activeElement check, since clicking a result should close it.
                         if searchFocused, !store.completions.isEmpty {
                             CompletionList(paths: store.completions,
                                            term: fileTerm(store.query) ?? "") {
@@ -151,7 +151,7 @@ struct ContentView: View {
         }
     }
 
-    /// Says why the list is as short as it is — especially after picking a day.
+    /// Says why the list is as short as it is, especially after picking a day.
     private var countLabel: String {
         let n = store.visible.count
         let inRepo = store.repo.map { " in \(repoLabel($0))" } ?? ""
@@ -159,7 +159,7 @@ struct ContentView: View {
         return "\(n) \(n == 1 ? "conversation" : "conversations")\(inRepo)\(onDay)"
     }
 
-    /// `file:` queries match paths, not prose — nothing to highlight in the text.
+    /// `file:` queries match paths, not prose, so nothing to highlight in the text.
     private var highlightTerm: String? {
         fileTerm(store.query) == nil && !store.query.isEmpty ? store.query : nil
     }
@@ -182,11 +182,11 @@ struct ContentView: View {
         }
     }
 
-    /// Which of the other filters emptied the repo out — the thing to undo.
+    /// Which of the other filters emptied the repo out, which is the thing to undo.
     private var repoEmptyReason: String {
         if !store.query.isEmpty { return "No conversation in this repo matches “\(store.query)”." }
         if let day = store.selectedDay { return "Nothing in this repo on \(shortLabel(day))." }
-        return "Nothing in this repo in \(store.scope.rawValue) — try All repos."
+        return "Nothing in this repo in \(store.scope.rawValue). Try All repos."
     }
 }
 
@@ -203,7 +203,7 @@ struct RepoMenu: View {
                 Divider()
                 ForEach(repos, id: \.repo) { r in
                     // A Toggle, so macOS draws the checkmark and clicking the picked
-                    // one turns it off — two ways back to all repos, both native.
+                    // one turns it off: two ways back to all repos, both native.
                     Toggle(isOn: Binding(get: { selected == r.repo },
                                          set: { selected = $0 ? r.repo : nil })) {
                         Text("\(repoLabel(r.repo))   \(r.count)")
@@ -233,13 +233,13 @@ struct RepoMenu: View {
 
 /// One bar per day across the whole window. Click to narrow to that day.
 ///
-/// ponytail: plain rectangles rather than Swift Charts — 20 lines beats learning
+/// ponytail: plain rectangles rather than Swift Charts, because 20 lines beats learning
 /// the chart selection API for 28 bars and a tooltip.
 struct DayStrip: View {
     let days: [DayBucket]
     @Binding var selected: String?
     @State private var hovered: Int?
-    /// Fixed, matching the web version — bars that stretch with the window read
+    /// Fixed, matching the web version, because bars that stretch with the window read
     /// as a different chart every time you drag the divider.
     var barWidth: CGFloat = 15
 
@@ -257,7 +257,7 @@ struct DayStrip: View {
             ForEach(Array(days.enumerated()), id: \.element.id) { i, d in
                 VStack(spacing: 6) {
                     // The bar sits at the bottom of a full-height column, and the
-                    // column is the hit area — otherwise a quiet day is a 2px target.
+                    // column is the hit area, or else a quiet day is a 2px target.
                     Spacer(minLength: 0)
                     RoundedRectangle(cornerRadius: 2)
                         .fill(fill(d, hovered: hovered == i))
@@ -295,7 +295,7 @@ struct DayStrip: View {
     }
 
     /// Centred under its bar, then kept inside the strip's own width. Bars are a
-    /// fixed pitch, so this is arithmetic — no GeometryReader needed.
+    /// fixed pitch, so this is arithmetic with no GeometryReader needed.
     private func tipX(_ i: Int) -> CGFloat {
         let centre = CGFloat(i) * columnPitch + barWidth / 2
         return min(max(0, centre - tipWidth / 2), max(0, stripWidth - tipWidth))
@@ -383,7 +383,7 @@ struct CompletionList: View {
             ForEach(paths.prefix(8), id: \.self) { p in
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     // The basename is what tells these paths apart, so it never
-                    // truncates — the directory gives way instead.
+                    // truncates; the directory gives way instead.
                     Text(highlighted((p as NSString).lastPathComponent, term))
                         .font(.system(size: 12, design: .monospaced))
                         .lineLimit(1)
@@ -418,7 +418,7 @@ struct CompletionList: View {
     }
 }
 
-/// Topics found by the last cross-reference, as filter chips — or, before there
+/// Topics found by the last cross-reference, as filter chips, or, before there
 /// has been one, the line that says what the button is for.
 struct TopicChips: View {
     let topics: [(label: String, count: Int)]
@@ -486,7 +486,7 @@ struct SessionRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Where and when, above the title — keeps the title line uncontested.
+            // Where and when, above the title, which keeps the title line uncontested.
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 HStack(spacing: 0) {
                     // Only the name is a button: the branch and the age half of this
@@ -523,7 +523,7 @@ struct SessionRow: View {
             }
 
             if !topics.isEmpty {
-                // "≈ topic", like the web version's .tag::before — these are
+                // "≈ topic", like the web version's .tag::before. These are
                 // approximate groupings, not labels anyone typed.
                 Text(topics.map { "≈ \($0)" }.joined(separator: "   "))
                     .font(.system(size: 11, design: .monospaced))
@@ -567,7 +567,7 @@ struct SessionRow: View {
     }
 
     /// A text match shows its context; a `file:` match shows which paths hit.
-    /// The match, with the term painted — same treatment the transcript gives it,
+    /// The match, with the term painted, the same treatment the transcript gives it,
     /// so a hit looks the same wherever you meet it.
     private var subtitle: AttributedString? {
         if let term = fileTerm(query) {
@@ -590,7 +590,7 @@ func age(_ epochSeconds: Double) -> String {
     relative.localizedString(for: Date(timeIntervalSince1970: epochSeconds), relativeTo: Date())
 }
 
-/// 842, 12.4k, 2.4M — token counts run to seven digits, and nobody reads those.
+/// 842, 12.4k, 2.4M. Token counts run to seven digits, and nobody reads those.
 func compact(_ n: Int) -> String {
     switch n {
     case 1_000_000...: String(format: "%.1fM", Double(n) / 1_000_000)
@@ -600,7 +600,7 @@ func compact(_ n: Int) -> String {
     }
 }
 
-/// "4h 12m", "35m", "50s" — a conversation's wall clock, not a duration to the second.
+/// "4h 12m", "35m", "50s": a conversation's wall clock, not a duration to the second.
 func spanLabel(_ seconds: Double) -> String {
     let s = Int(seconds.rounded())
     if s >= 3600 { return s % 3600 / 60 == 0 ? "\(s / 3600)h" : "\(s / 3600)h \(s % 3600 / 60)m" }
@@ -647,7 +647,7 @@ struct TranscriptView: View {
     /// Which session the messages on screen belong to, so a reload can tell a
     /// switch to another conversation from more text arriving in this one.
     @State private var loaded: Session.ID?
-    /// Whether the end of the transcript is on screen — what decides if a live
+    /// Whether the end of the transcript is on screen, which decides if a live
     /// append should be followed.
     @State private var atTail = true
 
@@ -687,11 +687,11 @@ struct TranscriptView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .coordinateSpace(name: scrollSpace)
-                    // Within a message or so of the end counts as "at the end" —
+                    // Within a message or so of the end counts as "at the end",
                     // resting exactly on the last pixel is not something anyone does.
                     .onPreferenceChange(TailDistance.self) { atTail = $0 < 120 }
                 }
-                // On arriving at a conversation, not on every live append — a
+                // On arriving at a conversation, not on every live append, because a
                 // transcript that yanked back to the search hit each time Claude
                 // typed another line would be unreadable.
                 .onChange(of: loaded) { scrollToFirstHit(proxy) }
@@ -704,7 +704,7 @@ struct TranscriptView: View {
             }
         }
         // Reloads when you pick another conversation, and again whenever this one
-        // grows — the watcher hands us a new Session with a higher count, which
+        // grows: the watcher hands us a new Session with a higher count, which
         // would otherwise sit in the list while the open transcript went stale.
         .task(id: "\(session.id)#\(session.count)") {
             let switched = loaded != session.id
@@ -778,7 +778,7 @@ struct TranscriptView: View {
 }
 
 /// One line of "what this conversation was", under the title: branch, models,
-/// wall clock, size, and what it cost. The full breakdown is a tooltip — the
+/// wall clock, size, and what it cost. The full breakdown is a tooltip, since the
 /// header is for recognising a conversation, not for auditing it.
 struct StatsLine: View {
     let stats: Stats
@@ -819,7 +819,7 @@ struct StatsLine: View {
             lines.append("Models: " + stats.models.map(shortModel).joined(separator: ", "))
         }
         if stats.input + stats.output > 0 {
-            // "in" is everything sent, cache reads included — that is what the log
+            // "in" is everything sent, cache reads included, which is what the log
             // records and what the context actually cost to carry.
             var t = "Tokens: \(stats.input.formatted()) in (cache included)"
                 + ", \(stats.output.formatted()) out"
@@ -853,7 +853,7 @@ struct MessageView: View {
     private var isUser: Bool { message.role == "user" }
 
     /// Your turns sit in a tinted card pushed to the right; Claude's run full width
-    /// as plain document text. The asymmetry is in the block, not the text — prose
+    /// as plain document text. The asymmetry is in the block, not the text: prose
     /// set flush right is hard to read back, and code blocks can't align that way
     /// at all. Runs alternate after merging, so no separators are needed.
     var body: some View {
@@ -869,7 +869,7 @@ struct MessageView: View {
                 .overlay(RoundedRectangle(cornerRadius: 10)
                     .stroke(Color.accentColor.opacity(0.22)))
                 // The 720 box caps how wide a long turn wraps; the card inside it
-                // is content-sized, so it must hug the box's trailing edge too —
+                // is content-sized, so it must hug the box's trailing edge too,
                 // otherwise a short message floats in the middle of the pane.
                 .frame(maxWidth: 720, alignment: .trailing)
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -897,7 +897,7 @@ struct MessageView: View {
 }
 
 
-/// A turn relayed from another Claude session — neither you nor this session's
+/// A turn relayed from another Claude session, so neither you nor this session's
 /// Claude, so it gets its own colour and sits full width rather than in either
 /// speaker's lane. Clicking through jumps to the session it came from.
 struct PeerMessageView: View {
@@ -932,7 +932,7 @@ struct PeerMessageView: View {
                     .buttonStyle(.borderless)
                 } else {
                     // The socket in the tag is long dead, so an unmatched name is
-                    // all that is left — say so rather than offering a dead link.
+                    // all that is left, so say so rather than offering a dead link.
                     Text("sender not in window")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)

@@ -110,13 +110,13 @@ enum AnalyzeError: LocalizedError {
 
 /// Where `claude` lives, by absolute path.
 ///
-/// An app launched from Finder inherits a minimal PATH — no Homebrew, no
-/// `~/.claude/local` — so `which` finds nothing and a bare "claude" never
+/// An app launched from Finder inherits a minimal PATH (no Homebrew, no
+/// `~/.claude/local`), so `which` finds nothing and a bare "claude" never
 /// launches. Ask a login shell, which is the only thing that knows what the
 /// user's profile put on PATH, and fall back to the known homes if it can't say.
 ///
 /// Shell first, not last: `~/.claude/local/claude` is a *stale* npm install on
-/// plenty of machines (it is here — a year old and it crashes on startup), and
+/// plenty of machines (it is here, a year old, and it crashes on startup), and
 /// guessing it over the one the user actually runs picks the broken one.
 func claudePath() -> String? {
     let probe = Process()
@@ -155,7 +155,7 @@ func runClaude(prompt: String) throws -> String {
     try proc.run()
 
     // The prompt is ~40KB and the pipe buffer is ~64KB, so writing it whole is
-    // *currently* safe — but it grows with maxAnalyzeSessions, and a full buffer
+    // *currently* safe, but it grows with maxAnalyzeSessions, and a full buffer
     // deadlocks against a child that is waiting for us to read its output. Both
     // ends move on their own thread; this one only reads.
     let writer = DispatchQueue(label: "dejavu.stdin")

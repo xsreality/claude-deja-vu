@@ -67,7 +67,7 @@ func snippet(_ blob: String, term: String, width: Int = 160) -> String? {
     return (start > blob.startIndex ? "…" : "") + body + (end < blob.endIndex ? "…" : "")
 }
 
-/// Paint every occurrence of `term`, not just the first — used by both the
+/// Paint every occurrence of `term`, not just the first. Used by both the
 /// transcript and the list rows, so a hit looks the same wherever you see it.
 func highlighting(_ attributed: AttributedString, _ term: String?) -> AttributedString {
     guard let term, !term.isEmpty else { return attributed }
@@ -90,13 +90,13 @@ func highlighted(_ s: String, _ term: String?) -> AttributedString {
 /// Each working directory mapped to the repo it belongs to: the shallowest other
 /// directory in the set that contains it, or itself.
 ///
-/// One repo turns up as many working directories — a git worktree under
+/// One repo turns up as many working directories: a git worktree under
 /// `.claude/worktrees/`, a source subdirectory you happened to be in, an openspec
 /// change dir. All of them sit under the repo on disk, so plain path text groups
 /// them, and unlike walking up to a `.git` it stays right for a directory that has
 /// since moved and works for a folder that was never a repo at all.
 ///
-/// ponytail: quadratic over *distinct* directories — 34 of them here, once per
+/// ponytail: quadratic over *distinct* directories, 34 of them here, once per
 /// scan. A sorted-prefix walk only if that ever reaches thousands.
 func repos(_ cwds: some Sequence<String>) -> [String: String] {
     let all = Set(cwds)
@@ -153,7 +153,7 @@ func dayKey(_ epochSeconds: Double) -> String {
 
 /// Daily message volume across the whole window, oldest day first.
 ///
-/// A conversation lands on the day it was last active — the same instant the
+/// A conversation lands on the day it was last active, the same instant the
 /// list sorts and labels it by, so the strip and the list agree.
 func dayHistogram(_ sessions: [Session], days: Int = weeks * 7) -> [DayBucket] {
     let cal = Calendar.current

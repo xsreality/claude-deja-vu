@@ -33,7 +33,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 # Ad-hoc signature: free, and all Apple Silicon needs to execute the binary.
-# Not Developer ID — that only matters once a download quarantines the bundle.
+# Not Developer ID, which only matters once a download quarantines the bundle.
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
-echo "built $APP — open it with: open $APP"
+echo "built $APP, open it with: open $APP"

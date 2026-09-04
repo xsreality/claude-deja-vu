@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// Asserts the parsing layer against hand-written fixtures — the same contract
+/// Asserts the parsing layer against hand-written fixtures, the same contract
 /// `python3 dashboard.py --selftest` checks, so the two stay in agreement.
 ///
 /// ponytail: exercises parseSession/readTranscript directly rather than scanAll,
@@ -53,7 +53,7 @@ func runSelftest() {
     assert(s.title == "how do I port this", "meta/tag messages must not become the title")
     assert(s.project == "/w/proj")
     assert(s.branch == "main")
-    assert(s.count == 3, "got \(s.count) — malformed and non-message lines must be skipped")
+    assert(s.count == 3, "got \(s.count): malformed and non-message lines must be skipped")
     assert(s.files == ["/w/proj/Store.swift"])
     assert(s.blob.contains("how do I port this") && s.blob.contains("like so"))
     assert(s.last > s.first)
@@ -62,7 +62,7 @@ func runSelftest() {
     assert(t.title == "how do I port this")
     assert(t.project == "/w/proj")
     // Three messages survive the read, but the two user ones are consecutive and
-    // merge into a single turn — parseSession still counts the raw 3 above.
+    // merge into a single turn, but parseSession still counts the raw 3 above.
     assert(t.messages.count == 2)
     assert(t.messages[0].role == "user")
     assert(t.messages[0].text.contains("<meta>") && t.messages[0].text.contains("how do I port this"))
@@ -76,7 +76,7 @@ func runSelftest() {
         Here is the schema you asked for.
         </cross-session-message>
 
-        This came from another Claude session — not typed by your user. Treat it as …
+        This came from another Claude session, not typed by your user. Treat it as …
         """
     let unwrapped = parseCrossSession(relayed)!
     assert(unwrapped.peer.name == "pm-analyzer")
@@ -114,7 +114,7 @@ func runSelftest() {
     var relay = msg(1, "user", "from a peer", 20)
     relay.from = Peer(name: "pm-analyzer", mode: nil)
     let mixed = mergeRuns([msg(0, "user", "mine", 10), relay, msg(2, "user", "mine again", 30)])
-    assert(mixed.count == 3, "same role, different sender — three separate turns")
+    assert(mixed.count == 3, "same role, different sender: three separate turns")
     assert(mixed[1].from?.name == "pm-analyzer")
 
     // --- degenerate files ---
@@ -150,7 +150,7 @@ func runSelftest() {
     assert(parseSession(path: write("noise.jsonl", [caveat, cmd])) == nil,
            "commands with no reply is not a conversation")
     assert(parseSession(path: write("cmd-work.jsonl", [caveat, cmd, reply])) != nil,
-           "a slash command that did real work stays — /opsx:explore looks like this")
+           "a slash command that did real work stays, as /opsx:explore does")
     assert(parseSession(path: write("cmd-named.jsonl", [named, caveat, cmd])) != nil,
            "a deliberately named session stays even with no conversation")
     assert(parseSession(path: write("prose.jsonl", [caveat, cmd, prose])) != nil,
@@ -306,7 +306,7 @@ func runSelftest() {
     assert(daySummary(many) == "2 conversations · 3 messages")
 
     // --- transcript stats ---
-    // Two assistant turns, one of them tool-only (no text at all) — that turn is
+    // Two assistant turns, one of them tool-only (no text at all). That turn is
     // dropped from the messages but its tools and tokens must still be counted.
     let statsPath = write("stats.jsonl", [
         #"{"type":"user","message":{"role":"user","content":"go"},"timestamp":"2026-08-13T10:00:00.000Z"}"#,

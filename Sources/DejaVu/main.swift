@@ -7,7 +7,7 @@ if CommandLine.arguments.contains("--selftest") {
     exit(0)
 }
 
-// The Cross-reference button, headless — the one way to exercise the `claude -p`
+// The Cross-reference button, headless: the one way to exercise the `claude -p`
 // call (PATH probing, pipes, parsing) without a UI in front of it.
 if CommandLine.arguments.contains("--analyze") {
     do {
@@ -15,7 +15,7 @@ if CommandLine.arguments.contains("--analyze") {
         print("\(i.summaries.count) summaries, \(i.clusters.count) clusters → \(insightsFile)")
         for c in i.clusters { print("  \(c.label): \(c.session_ids.count)") }
     } catch {
-        print("failed — \(error.localizedDescription)")
+        print("failed: \(error.localizedDescription)")
         exit(1)
     }
     exit(0)

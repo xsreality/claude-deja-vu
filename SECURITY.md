@@ -18,7 +18,7 @@ rather than in a public issue.
 - The app ships **unsandboxed**, because reading `~/.claude/projects` and
   spawning the `claude` CLI both require it. This also means the Mac App Store
   is not a distribution option.
-- There are **no third-party dependencies** — the app is Swift plus Apple
+- There are **no third-party dependencies**. The app is Swift plus Apple
   frameworks, so there is no transitive supply chain to audit.
 
 ## What you can verify about a release
@@ -35,7 +35,7 @@ gh attestation verify ClaudeDejaVu-0.1.2.dmg \
 
 That proves which repository, commit and workflow produced the exact bytes you
 downloaded. Releases also carry `SHA256SUMS`, and the Homebrew cask pins the
-DMG's SHA-256 — Homebrew refuses a download that does not match. The cask is
+DMG's SHA-256, so Homebrew refuses a download that does not match. The cask is
 only bumped by a workflow that verifies the attestation first, so a
 `brew install` cannot pin an unverified artifact.
 

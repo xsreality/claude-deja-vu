@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Déjà Vu — a dashboard for your Claude Code conversations.
+"""Claude Déjà Vu: a dashboard for your Claude Code conversations.
 
 Scans ~/.claude/projects/**/*.jsonl for sessions active in the last 4 weeks and
 serves a local web view: browse recent sessions (newest first, grouped by
@@ -376,7 +376,7 @@ def session_view(s, term=None, fterm=None):
 def day_histogram(sessions, days=WEEKS * 7):
     """Daily message volume across the whole window, oldest day first.
 
-    A conversation lands on the day it was last active — the same instant the
+    A conversation lands on the day it was last active, the same instant the
     list sorts and labels it by, so the strip and the list agree.
     """
     span = [date.today() - timedelta(days=i) for i in range(days - 1, -1, -1)]
@@ -405,7 +405,7 @@ def api_sessions(q, scope):
     elif q:
         ql = q.lower()
         sessions = [s for s in sessions if ql in s["blob"].lower()]
-    # The strip spans the whole window even when the list is scoped tighter —
+    # The strip spans the whole window even when the list is scoped tighter,
     # its job is to show when the matches happened, including outside the scope.
     days = day_histogram(sessions)
     cutoff = time.time() - SCOPES.get(scope, WINDOW_SECONDS)
@@ -501,7 +501,7 @@ header{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
   border:1px solid var(--line);border-radius:6px;padding:8px 11px}
 #q::placeholder{color:var(--faded)}
 #q:focus{outline:0;border-color:var(--accent)}
-/* file: autocomplete — a datalist can't match options against a prefixed query */
+/* file: autocomplete, because a datalist can't match options against a prefixed query */
 #ac{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;display:none;
   background:var(--pane);border:1px solid var(--line);border-radius:8px;
   max-height:300px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.13)}
@@ -699,7 +699,7 @@ function highlight(s,q){s=s||'';if(!q)return esc(s);
     out+=esc(s.slice(i,j))+'<mark>'+esc(s.slice(j,j+q.length))+'</mark>';i=j+q.length}
   return out+esc(s.slice(i))}
 function qval(){return document.getElementById('q').value.trim()}
-// `file:<path>` searches paths, not prose — highlight the path, not the prefix.
+// `file:<path>` searches paths, not prose, so highlight the path and not the prefix.
 function hterm(){const q=qval();
   return /^file:/i.test(q)?q.slice(5).trim():q}
 // Path completions for a `file:` query. Rebuilt on every load; the server ranks them.
@@ -822,8 +822,8 @@ function renderChips(){const el=document.getElementById('chips');el.innerHTML=''
 function dayKey(t){return new Date(t*1000).toLocaleDateString('en-CA')}
 function dayLabel(d,opts){return new Date(d+'T00:00').toLocaleDateString(undefined,opts)}
 function dayTip(d){
-  if(!d.m)return dayLabel(d.d,{weekday:'long',day:'numeric',month:'long'})+' — nothing';
-  const head=dayLabel(d.d,{weekday:'long',day:'numeric',month:'long'})+' — '
+  if(!d.m)return dayLabel(d.d,{weekday:'long',day:'numeric',month:'long'})+': nothing';
+  const head=dayLabel(d.d,{weekday:'long',day:'numeric',month:'long'})+': '
     +d.c+(d.c===1?' conversation, ':' conversations, ')+d.m+' messages';
   return [head].concat((d.p||[]).map(([p,m])=>'  '+proj(p)+' '+m)).join('\\n')}
 // Own tooltip rather than title=: the native one is small, slow, and unstyleable.
@@ -950,7 +950,7 @@ document.getElementById('q').addEventListener('input',debounce(load,200));
 document.getElementById('analyze').addEventListener('click',async()=>{
   const m=document.getElementById('msg');m.textContent='Reading your conversations…';
   try{const r=await fetch('/api/analyze',{method:'POST'});const d=await r.json();
-    m.textContent=d.ok?'Cross-referenced.':('Couldn\\u2019t reach Claude — '+d.error);
+    m.textContent=d.ok?'Cross-referenced.':('Couldn\\u2019t reach Claude: '+d.error);
     if(d.ok)load()}catch(e){m.textContent='Couldn\\u2019t reach Claude.'}});
 function debounce(f,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>f(...a),ms)}}
 // ?q=term&scope=7d prefills the view, so a search can be linked or bookmarked.

@@ -1,7 +1,7 @@
 import SwiftUI
 
 // Block-level markdown, ported from dashboard.py's md(). AttributedString only
-// does inline markup — headings, lists, tables and quotes need real layout, so
+// does inline markup. Headings, lists, tables and quotes need real layout, so
 // the text is split into blocks here and each block is laid out as itself.
 //
 // ponytail: plain string scanning, no regex and no parser dependency. It covers
@@ -165,7 +165,7 @@ func parseBlocks(_ text: String) -> [Block] {
             i += 1
         }
         if body.isEmpty {
-            // A block starter no branch claimed — a `| x |` line with no divider
+            // A block starter no branch claimed, such as a `| x |` line with no divider
             // under it, say. The web drops these; keep it as text instead, since
             // silently losing a line of a transcript is worse than plain styling.
             out.append(.paragraph(line))

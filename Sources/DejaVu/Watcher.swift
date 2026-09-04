@@ -5,7 +5,7 @@ import Foundation
 ///
 /// ponytail: FSEvents rather than a timer. A rescan reads every session file in
 /// the 4-week window, so polling for changes would cost far more than the changes
-/// are worth — and a live conversation writes a line every few seconds, which a
+/// are worth, and a live conversation writes a line every few seconds, which a
 /// poll would either miss or chase. The stream's own latency does the coalescing,
 /// so a burst of appends is one rescan.
 final class Watcher {
