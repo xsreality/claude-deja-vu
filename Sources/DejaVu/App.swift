@@ -57,7 +57,7 @@ struct ContentView: View {
         // read as an underline on the scope picker.
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 18) {
-                TextField("Search, or file: to search paths", text: $store.query)
+                TextField("Search, \"exact word\", or file: for paths", text: $store.query)
                     .textFieldStyle(.roundedBorder)
                     .focused($searchFocused)
                     .frame(maxWidth: 460)
@@ -67,7 +67,7 @@ struct ContentView: View {
                         // activeElement check, since clicking a result should close it.
                         if searchFocused, !store.completions.isEmpty {
                             CompletionList(paths: store.completions,
-                                           term: fileTerm(store.query) ?? "") {
+                                           match: matcher(fileTerm(store.query) ?? "")) {
                                 store.query = filePrefix + $0
                             }
                             .offset(y: 26)
@@ -142,7 +142,7 @@ struct ContentView: View {
         } detail: {
             if let s = store.visible.first(where: { $0.id == selection })
                 ?? store.sessions.first(where: { $0.id == selection }) {
-                TranscriptView(session: s, term: highlightTerm,
+                TranscriptView(session: s, term: highlightMatch,
                                resume: store.resumeCommand(s), store: store,
                                onOpen: { selection = $0 })
             } else {
@@ -160,8 +160,8 @@ struct ContentView: View {
     }
 
     /// `file:` queries match paths, not prose, so nothing to highlight in the text.
-    private var highlightTerm: String? {
-        fileTerm(store.query) == nil && !store.query.isEmpty ? store.query : nil
+    private var highlightMatch: Match? {
+        fileTerm(store.query) == nil ? matcher(store.query) : nil
     }
 
     @ViewBuilder private var emptyState: some View {
@@ -374,7 +374,7 @@ func longLabel(_ day: String) -> String {
 
 struct CompletionList: View {
     let paths: [String]
-    let term: String
+    let match: Match?
     let pick: (String) -> Void
     @State private var hovered: String?
 
@@ -384,7 +384,7 @@ struct CompletionList: View {
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     // The basename is what tells these paths apart, so it never
                     // truncates; the directory gives way instead.
-                    Text(highlighted((p as NSString).lastPathComponent, term))
+                    Text(highlighted((p as NSString).lastPathComponent, match))
                         .font(.system(size: 12, design: .monospaced))
                         .lineLimit(1)
                         .layoutPriority(1)
@@ -571,12 +571,13 @@ struct SessionRow: View {
     /// so a hit looks the same wherever you meet it.
     private var subtitle: AttributedString? {
         if let term = fileTerm(query) {
-            let hits = matchingFiles(session, term).prefix(3)
+            let m = matcher(term)
+            let hits = matchingFiles(session, m).prefix(3)
                 .map { ($0 as NSString).lastPathComponent }
-            return hits.isEmpty ? nil : highlighted(hits.joined(separator: " · "), term)
+            return hits.isEmpty ? nil : highlighted(hits.joined(separator: " · "), m)
         }
-        guard !query.isEmpty, let s = snippet(session.blob, term: query) else { return nil }
-        return highlighted(s, query)
+        guard let m = matcher(query), let s = snippet(session.blob, m) else { return nil }
+        return highlighted(s, m)
     }
 }
 
@@ -637,7 +638,7 @@ struct RenderedMessage: Identifiable {
 
 struct TranscriptView: View {
     let session: Session
-    let term: String?
+    let term: Match?
     let resume: String
     let store: Store
     let onOpen: (Session.ID) -> Void
@@ -769,10 +770,9 @@ struct TranscriptView: View {
 
     /// Open a search result on the match, not at the top.
     private func scrollToFirstHit(_ proxy: ScrollViewProxy) {
-        guard let term, !term.isEmpty,
-              let hit = messages.first(where: {
-                  $0.text.range(of: term, options: .caseInsensitive) != nil
-              }) else { return }
+        guard let term,
+              let hit = messages.first(where: { term.range(in: $0.text) != nil })
+        else { return }
         withAnimation { proxy.scrollTo(hit.id, anchor: .center) }
     }
 }
@@ -847,7 +847,7 @@ private struct TailDistance: PreferenceKey {
 
 struct MessageView: View {
     let message: RenderedMessage
-    let term: String?
+    let term: Match?
     let onOpen: (Session.ID) -> Void
 
     private var isUser: Bool { message.role == "user" }
@@ -905,7 +905,7 @@ struct PeerMessageView: View {
     let senderID: Session.ID?
     let blocks: [Block]
     let ts: Double?
-    let term: String?
+    let term: Match?
     let onOpen: (Session.ID) -> Void
 
     private let tint = Color.purple

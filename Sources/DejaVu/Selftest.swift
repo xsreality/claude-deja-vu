@@ -170,23 +170,100 @@ func runSelftest() {
 
     let blob = "alpha beta GAMMA delta"
     // Expected strings are dashboard.py's actual output, so these assert parity.
-    assert(snippet(blob, term: "gamma", width: 6) == "…ta GAMMA de…")
-    assert(snippet(blob, term: "alpha", width: 4) == "alpha b…", "no leading ellipsis at the start")
-    assert(snippet(blob, term: "missing") == nil)
-    assert(snippet("one\ntwo", term: "one", width: 100) == "one two", "newlines flattened")
+    func snip(_ b: String, _ q: String, _ w: Int = 160) -> String? {
+        snippet(b, matcher(q)!, width: w)
+    }
+    assert(snip(blob, "gamma", 6) == "…ta GAMMA de…")
+    assert(snip(blob, "alpha", 4) == "alpha b…", "no leading ellipsis at the start")
+    assert(snip(blob, "missing") == nil)
+    assert(snip("one\ntwo", "one", 100) == "one two", "newlines flattened")
     // A term whose case folding changes length must not slide the window off.
-    assert(snippet("xİx", term: "İ", width: 2)?.contains("İ") == true)
+    assert(snip("xİx", "İ", 2)?.contains("İ") == true)
+    // A quoted query snippets a whole-word hit, not the first fragment.
+    assert(snip("logger and log", "\"log\"", 4)?.contains("log") == true)
+    assert(snip("logger only", "\"log\"") == nil, "no whole word, no snippet")
+
+    // --- quoted whole-word search ---
+    // What the query means. Quoting is decided by the first character, so an
+    // unterminated quote is a quoted search of what is there so far, and a
+    // quotation with nothing in it is no query at all.
+    assert(matcher("log")?.whole == false)
+    assert(matcher("\"log\"")?.whole == true)
+    assert(matcher("\"log")?.whole == true, "an unterminated quote still means whole-word")
+    assert(matcher("\"log\"")?.term == "log", "the quotes are not part of the term")
+    assert(matcher("") == nil && matcher("\"") == nil && matcher("\"\"") == nil,
+           "an empty term is no query, not a search for nothing")
+
+    func finds(_ text: String, _ query: String) -> Bool {
+        matcher(query)!.range(in: text) != nil
+    }
+    // The boundary rule: a word character is a letter, a digit, or an underscore,
+    // so punctuation bounds a word and snake_case does not.
+    for yes in ["log the error", "log.info(x)", "(log)", "--log", "src/log/main.swift",
+                "LOG", "log", "log-level", "a\nlog\nb"] {
+        assert(finds(yes, "\"log\""), "whole word in \(yes.debugDescription)")
+    }
+    for no in ["login", "backlog", "dialog", "logger", "log_level", "_log", "log2", "2log"] {
+        assert(!finds(no, "\"log\""), "fragment in \(no.debugDescription)")
+    }
+    // Beyond ASCII, by the same rule.
+    assert(finds("die straße ist", "\"straße\"") && !finds("straßenbahn", "\"straße\""))
+    // A quoted phrase keeps its words adjacent, and is bounded only at its ends.
+    assert(finds("the log level is", "\"log level\""))
+    assert(!finds("catalog levels", "\"log level\""))
+    // The term is never a pattern: no escaping to get wrong, so anything typeable
+    // finds itself and nothing stands for anything else.
+    assert(finds("foo(bar)", "\"foo(bar)\"") && !finds("xfoo(bar)", "\"foo(bar)\""))
+    assert(finds("a.b", "\"a.b\"") && !finds("axb", "\"a.b\""), "a dot is a dot")
+    assert(finds("a[]b", "\"[]\"") && finds("a|b", "\"a|b\""))
+    // A term whose own edge is punctuation is not guarded on that side, which is
+    // why the rule is not `\b`: `\b\$PATH\b` can never match "$PATH".
+    assert(finds("$PATH", "\"$PATH\"") && finds("x$PATH", "\"$PATH\""))
+    assert(!finds("$PATHS", "\"$PATH\""), "the word end is still guarded")
+    // A rejected occurrence must not hide a later valid one.
+    assert(finds("loglog log", "\"log\""))
+    // Unquoted search is untouched: still any occurrence, still case-insensitive.
+    for any in ["login", "backlog", "log_level", "LOG"] { assert(finds(any, "log")) }
+
+    // What `recompute()` does with the above: the filter it applies, over sessions
+    // whose text differs only in whether the term stands alone. Asserted here
+    // rather than through `Store`, which scans disk and would need a seam built
+    // only for this. Same call the repo filter's counting tests made.
+    func said(_ id: String, _ text: String) -> Session {
+        Session(id: id, path: "", title: "", project: "/w/p", branch: nil,
+                first: 0, last: Date().timeIntervalSince1970, count: 1, blob: text,
+                files: [], peers: [], blobLower: text.lowercased())
+    }
+    let corpus = [said("frag", "the login failed"), said("word", "read the log")]
+    assert(corpus.filter { matcher("\"log\"")!.hits($0) }.map(\.id) == ["word"],
+           "quoted keeps only the whole word")
+    assert(corpus.filter { matcher("log")!.hits($0) }.map(\.id) == ["frag", "word"],
+           "unquoted keeps both, exactly as before")
+    // The activity strip is built from what survived, so it narrows with it.
+    let narrowed = dayHistogram(corpus.filter { matcher("\"log\"")!.hits($0) })
+    assert(narrowed.last!.sessions == 1 && dayHistogram(corpus).last!.sessions == 2)
 
     let fs = Session(id: "x", path: "", title: "", project: "", branch: nil, first: 0, last: 0,
                      count: 1, blob: "", files: ["/a/deep/nested/dash.py", "/a/dash.py",
                                                  "/dash.py/other.txt"],
                      peers: [], blobLower: "")
-    assert(matchingFiles(fs, "dash.py").count == 3)
-    assert(matchingFiles(fs, "DASH").count == 3, "case-insensitive")
-    assert(matchingFiles(fs, "nope").isEmpty)
+    assert(matchingFiles(fs, matcher("dash.py")).count == 3)
+    assert(matchingFiles(fs, matcher("DASH")).count == 3, "case-insensitive")
+    assert(matchingFiles(fs, matcher("nope")).isEmpty)
+    assert(matchingFiles(fs, nil).count == 3, "no term means every file, as bare `file:` does")
     // basename hits first, then shortest path
-    assert(completeFiles([fs], "dash.py") == ["/a/dash.py", "/a/deep/nested/dash.py",
-                                              "/dash.py/other.txt"])
+    assert(completeFiles([fs], matcher("dash.py")!) == ["/a/dash.py", "/a/deep/nested/dash.py",
+                                                        "/dash.py/other.txt"])
+    // Paths take the same rule: `file:"dash"` is the word, not the fragment.
+    let paths = Session(id: "y", path: "", title: "", project: "", branch: nil, first: 0,
+                        last: 0, count: 1, blob: "",
+                        files: ["/a/Store.swift", "/a/Restore.swift", "/a/StoreTests.swift",
+                                "/a/store/main.swift", "/a/my-store.swift"],
+                        peers: [], blobLower: "")
+    assert(Set(matchingFiles(paths, matcher("\"store\""))) == ["/a/Store.swift",
+                                                              "/a/store/main.swift",
+                                                              "/a/my-store.swift"])
+    assert(matchingFiles(paths, matcher("store")).count == 5, "unquoted still matches all five")
 
     // --- repos ---
     // The real shapes this has to get right, from ~/.claude/projects: a source
@@ -240,12 +317,26 @@ func runSelftest() {
     func painted(_ a: AttributedString) -> Int {
         a.runs.filter { $0.backgroundColor != nil }.count
     }
-    let hit = highlighted("abc X abc", "ABC")
+    let hit = highlighted("abc X abc", matcher("ABC"))
     assert(painted(hit) == 2, "every occurrence, case-insensitively")
     assert(String(hit.characters) == "abc X abc", "highlighting must not alter the text")
-    assert(painted(highlighted("abc", "zzz")) == 0)
-    assert(painted(highlighted("abc", "")) == 0, "empty term paints nothing (and terminates)")
+    assert(painted(highlighted("abc", matcher("zzz"))) == 0)
+    assert(painted(highlighted("abc", matcher(""))) == 0,
+           "empty term paints nothing (and terminates)")
     assert(painted(highlighted("abc", nil)) == 0)
+
+    // The filter, the snippet and the highlight must agree, or a row matches with
+    // nothing marked, or worse, marks the fragment the query rejected.
+    let both = "login failed, see the log here"
+    let word = matcher("\"log\"")!
+    assert(word.range(in: both) != nil, "the row matches")
+    let marked = highlighted(both, word)
+    let runs = marked.runs.filter { $0.backgroundColor != nil }
+    assert(runs.count == 1, "only the whole word is painted, not the one inside `login`")
+    assert(runs.allSatisfy { String(marked[$0.range].characters) == "log" })
+    assert(painted(highlighted(both, matcher("log"))) == 2, "unquoted still paints both")
+    // Rejected-only text paints nothing and still terminates.
+    assert(painted(highlighted("login logger backlog", word)) == 0)
 
     // --- markdown blocks ---
     assert(parseBlocks("# Title") == [.heading(level: 1, text: "Title")])
