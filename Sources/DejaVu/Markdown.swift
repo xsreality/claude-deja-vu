@@ -185,7 +185,7 @@ private let codeSize: CGFloat = 12.5
 private let bodyLeading: CGFloat = 6.5
 
 /// Inline markup for one run of text, with `code` spans styled and search hits painted.
-func inlineMarkdown(_ s: String, highlight: String? = nil) -> AttributedString {
+func inlineMarkdown(_ s: String, highlight: Match? = nil) -> AttributedString {
     var a = (try? AttributedString(
         markdown: s,
         options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
@@ -204,7 +204,7 @@ func inlineMarkdown(_ s: String, highlight: String? = nil) -> AttributedString {
 
 struct MarkdownView: View {
     let blocks: [Block]
-    var highlight: String?
+    var highlight: Match?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -285,7 +285,7 @@ struct MarkdownView: View {
 struct TableBlock: View {
     let head: [String]
     let rows: [[String]]
-    var highlight: String?
+    var highlight: Match?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {

@@ -533,10 +533,10 @@ final class Store {
         // showing everything.
         var rows = repo.map { r in sessions.filter { repo(of: $0) == r } } ?? sessions
         if let term = fileTerm(query) {
-            rows = rows.filter { !matchingFiles($0, term).isEmpty }
-        } else if !query.isEmpty {
-            let q = query.lowercased()
-            rows = rows.filter { $0.blobLower.contains(q) }
+            let m = matcher(term)
+            rows = rows.filter { !matchingFiles($0, m).isEmpty }
+        } else if let m = matcher(query) {
+            rows = rows.filter { m.hits($0) }
         }
         matched = rows
         days = dayHistogram(matched)
@@ -574,11 +574,11 @@ final class Store {
     }
 
     var completions: [String] {
-        guard let term = fileTerm(query), !term.isEmpty else { return [] }
-        let hits = completeFiles(visible, term)
+        guard let term = fileTerm(query), let m = matcher(term) else { return [] }
+        let hits = completeFiles(visible, m)
         // Picking a completion puts that exact path in the box, which still matches
         // itself, so offering it back is noise. Same for a path typed out in full.
-        return hits == [term] ? [] : hits
+        return hits == [m.term] ? [] : hits
     }
 
     /// Which session a relayed message came from, if it can be pinned down.

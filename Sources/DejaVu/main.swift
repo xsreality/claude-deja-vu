@@ -27,9 +27,9 @@ if let i = CommandLine.arguments.firstIndex(of: "--dump") {
     let query = CommandLine.arguments.count > i + 1 ? CommandLine.arguments[i + 1] : ""
     var found = scanAll().sessions
     if let term = fileTerm(query) {
-        found = found.filter { !matchingFiles($0, term).isEmpty }
-    } else if !query.isEmpty {
-        found = found.filter { $0.blobLower.contains(query.lowercased()) }
+        found = found.filter { !matchingFiles($0, matcher(term)).isEmpty }
+    } else if let m = matcher(query) {
+        found = found.filter { m.hits($0) }
     }
     for s in found {
         print("\(s.id)\t\(s.count)\t\(s.files.count)\t\(s.project)\t\(s.title.replacingOccurrences(of: "\n", with: " "))")
