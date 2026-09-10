@@ -77,7 +77,7 @@ Results are cached in `~/Library/Application Support/DejaVu/insights.json`, so t
 Every release is built by a GitHub Actions workflow in this repository and carries a signed [build provenance attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations). You can check that the DMG you downloaded came from this repository's workflow, and not from anywhere else:
 
 ```bash
-gh attestation verify ClaudeDejaVu-0.1.2.dmg \
+gh attestation verify ClaudeDejaVu-0.1.3.dmg \
   --repo xsreality/claude-deja-vu \
   --signer-workflow xsreality/claude-deja-vu/.github/workflows/release.yml
 ```

@@ -28,7 +28,7 @@ Every release is built by
 runner and carries a Sigstore-signed build provenance attestation:
 
 ```bash
-gh attestation verify ClaudeDejaVu-0.1.2.dmg \
+gh attestation verify ClaudeDejaVu-0.1.3.dmg \
   --repo xsreality/claude-deja-vu \
   --signer-workflow xsreality/claude-deja-vu/.github/workflows/release.yml
 ```
