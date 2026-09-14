@@ -93,10 +93,30 @@ struct Stats {
     var thinking = 0
     /// Tool calls by name, most used first.
     var tools: [(name: String, count: Int)] = []
+    /// Skills invoked and subagents dispatched, in the order they first ran.
+    ///
+    /// Apart from the tools, because counting sorts them exactly backwards: a skill
+    /// runs once where `Bash` runs hundreds of times, so the fact that best
+    /// describes the conversation would sort last and be cut off.
+    var skills: [(name: String, count: Int)] = []
+    var agents: [(name: String, count: Int)] = []
     /// Wall clock from the first message to the last.
     var span: Double = 0
 
-    var toolCalls: Int { tools.reduce(0) { $0 + $1.count } }
+    /// Everything the conversation invoked. Skills and agents are tool calls too;
+    /// listing them separately is presentation, and must not shrink the total.
+    var toolCalls: Int {
+        [tools, skills, agents].joined().reduce(0) { $0 + $1.count }
+    }
+}
+
+/// Bump a first-use-ordered tally.
+///
+/// ponytail: linear scan, because these hold a handful of names — a conversation
+/// invokes a few skills, not a few hundred. A dictionary if that ever changes.
+func tally(_ list: inout [(name: String, count: Int)], _ name: String) {
+    if let i = list.firstIndex(where: { $0.name == name }) { list[i].count += 1 }
+    else { list.append((name: name, count: 1)) }
 }
 
 struct Transcript {
@@ -107,6 +127,8 @@ struct Transcript {
 }
 
 // --- parsing -----------------------------------------------------------------
+
+func emptyToNil(_ s: String) -> String? { s.isEmpty ? nil : s }
 
 /// Plain text from a message .content (string, or list of blocks).
 func textOf(_ content: Any?) -> String {
@@ -353,7 +375,17 @@ func readTranscript(path: String) -> Transcript {
         for b in msg["content"] as? [Any] ?? [] {
             guard let d = b as? [String: Any], d["type"] as? String == "tool_use",
                   let name = d["name"] as? String else { continue }
-            toolCounts[name, default: 0] += 1
+            // A skill and a subagent are both written as a tool call named after the
+            // mechanism, which is the same for every one of them. What identifies the
+            // conversation sits one level down, in the input. An invocation missing
+            // that stays a plain tool call rather than vanishing from the counts.
+            let arg = d["input"] as? [String: Any]
+            switch (name, (arg?["skill"] as? String).flatMap(emptyToNil),
+                    (arg?["subagent_type"] as? String).flatMap(emptyToNil)) {
+            case ("Skill", .some(let skill), _): tally(&stats.skills, skill)
+            case ("Agent", _, .some(let agent)): tally(&stats.agents, agent)
+            default: toolCounts[name, default: 0] += 1
+            }
         }
         if let ep = epoch(o["timestamp"]) {
             first = first.map { min($0, ep) } ?? ep

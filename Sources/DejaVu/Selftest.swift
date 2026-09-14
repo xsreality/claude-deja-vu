@@ -403,14 +403,43 @@ func runSelftest() {
         #"{"type":"user","message":{"role":"user","content":"go"},"timestamp":"2026-08-13T10:00:00.000Z"}"#,
         #"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"on it"}],"usage":{"input_tokens":10,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000,"output_tokens":7,"output_tokens_details":{"thinking_tokens":3}}},"timestamp":"2026-08-13T10:00:30.000Z"}"#,
         #"{"type":"assistant","message":{"role":"assistant","model":"claude-haiku-4-5-20251001","content":[{"type":"tool_use","name":"Bash","input":{}},{"type":"tool_use","name":"Bash","input":{}},{"type":"tool_use","name":"Edit","input":{"file_path":"/w/a.swift"}}],"usage":{"input_tokens":1,"output_tokens":2}},"timestamp":"2026-08-13T10:20:00.000Z"}"#,
+        // Skills and agents: named one level down, in the input. The empty skill name
+        // is the unreadable record that must stay counted rather than vanish. Kept at
+        // 10:20:00 so the span assertion below still measures the same 20 minutes.
+        #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"grilling"}},{"type":"tool_use","name":"Agent","input":{"subagent_type":"Explore"}},{"type":"tool_use","name":"Agent","input":{"subagent_type":"Explore"}},{"type":"tool_use","name":"Skill","input":{"skill":"domain-modeling"}},{"type":"tool_use","name":"Skill","input":{"skill":""}},{"type":"tool_use","name":"mcp__claude_ai_Figma__get_design_context","input":{}}]},"timestamp":"2026-08-13T10:20:00.000Z"}"#,
     ])
     let st = readTranscript(path: statsPath).stats
     assert(st.models == ["claude-opus-5", "claude-haiku-4-5-20251001"], "first-seen order, no repeats")
     assert(st.input == 1111, "fresh + cache creation + cache read")
     assert(st.output == 9 && st.thinking == 3)
-    assert(st.tools.map(\.name) == ["Bash", "Edit"], "most used first")
+    assert(st.tools.map(\.name)
+        == ["Bash", "Edit", "Skill", "mcp__claude_ai_Figma__get_design_context"],
+        "most used first; a skill with no name falls back to the mechanism")
     assert(st.tools.first!.count == 2)
-    assert(st.toolCalls == 3)
+    assert(st.skills.map(\.name) == ["grilling", "domain-modeling"], "first-use order")
+    assert(st.skills.allSatisfy { $0.count == 1 })
+    assert(st.agents.map(\.name) == ["Explore"] && st.agents.first!.count == 2)
+    assert(st.toolCalls == 9, "tools + skills + agents: the total must not shrink")
+    assert(tallyText(st.skills) == "grilling, domain-modeling", "no count where one ran once")
+    assert(tallyText(st.agents) == "Explore \u{00D7}2", "a count only where one repeated")
+
+    // The hover card's rows: order, and nothing empty shown.
+    let statsSession = parseSession(path: statsPath)!
+    let rows = statsRows(st, statsSession)
+    assert(rows.map(\.label) == ["Models", "Tokens", "Skills", "Agents", "Tools"],
+           "skills and agents sit above the tools, and no peers row without peers")
+    assert(rows.first { $0.label == "Skills" }!.value == "grilling, domain-modeling")
+    assert(rows.first { $0.label == "Tools" }!.value.hasPrefix("Bash 2, Edit 1"),
+           "counts kept, MCP names shortened")
+    assert(rows.first { $0.label == "Tools" }!.value.contains("Figma:get_design_context"))
+    assert(statsRows(Stats(), statsSession).isEmpty, "no stats, no card")
+
+    // Display-only shortening: never merges two tools, never touches a plain name.
+    assert(shortTool("mcp__claude_ai_Figma__get_design_context") == "Figma:get_design_context")
+    assert(shortTool("mcp__sonarqube__show_rule") == "sonarqube:show_rule")
+    assert(shortTool("Bash") == "Bash" && shortTool("AskUserQuestion") == "AskUserQuestion")
+    assert(shortTool("mcp__only_server") == "mcp__only_server", "not an MCP shape")
+    assert(shortTool("mcp__srv__a__b") == "srv:a__b", "only the first split is the server")
     assert(st.span == 1200, "20 minutes from first message to last")
     assert(readTranscript(path: statsPath).messages.count == 2, "the tool-only turn has no text to show")
     assert(readTranscript(path: empty).stats.models.isEmpty, "an empty file has no stats")

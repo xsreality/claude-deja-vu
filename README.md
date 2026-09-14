@@ -18,7 +18,7 @@ If you run Claude Code across many terminals and repos, related discussions end 
 - **See when it happened.** An activity strip shows one bar per day across the whole 4-week window. Click a day to filter the list to it. When you search, the strip narrows to days with matches, so it answers "which week was that?" before you start scrolling.
 - **Jump straight to the match.** Open a search result and the transcript scrolls to the first hit, with every occurrence highlighted.
 - **Read comfortably.** Transcripts render markdown (headings, lists, tables, and code blocks) instead of a wall of raw text.
-- **See what a conversation was made of.** Each transcript header carries the model, how long it ran, the message count, and the files and tools it touched.
+- **See what a conversation was made of.** Each transcript header carries the model, how long it ran, the message count, and the files and tools it touched. Hover it for the rest: the skills the conversation invoked, the subagents it sent out, and the tools it leaned on most.
 - **Follow along live.** The open transcript updates as the conversation continues in your terminal.
 - **Resume where you left off.** One click copies the `cd … && claude --resume …` command for the conversation you're reading.
 - **Group related work (optional).** *Cross-reference* asks Claude to read your recent conversations and group them into topics. Topics span projects, so "auth migration" can pull together conversations from three different repos. Each conversation also gets a one-line summary of what it was actually about.
