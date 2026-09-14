@@ -473,6 +473,60 @@ func runSelftest() {
     assert(shortModel("claude-haiku-4-5-20251001") == "haiku-4-5", "the date stamp is noise")
     assert(shortModel("some-other-model") == "some-other-model")
 
+    // --- exporting a conversation ---
+    // Everything the spec names in one fixture: ordinary turns both ways, a turn
+    // relayed from another session, and a turn carrying its own heading and a
+    // fenced code block, which is what the separator choice has to survive.
+    let exportPath = write("export.jsonl", [
+        #"{"type":"user","message":{"role":"user","content":"how do I port this"},"cwd":"/w/proj","gitBranch":"main","timestamp":"2026-08-13T10:00:00.000Z"}"#,
+        #"{"type":"assistant","message":{"role":"assistant","content":"Like so.\n\n# Порт\n\n## The approach\n\n```swift\nlet x = 1\n```"},"timestamp":"2026-08-13T10:01:00.000Z"}"#,
+        #"{"type":"user","message":{"role":"user","content":"Another Claude session sent a message:\n<cross-session-message from=\"uds:/x.sock\" from-name=\"pm-analyzer\">the schema moved</cross-session-message>"},"timestamp":"2026-08-13T10:02:00.000Z"}"#,
+        #"{"type":"user","message":{"role":"user","content":"thanks"},"timestamp":"2026-08-13T10:03:00.000Z"}"#,
+    ])
+    let exported = parseSession(path: exportPath)!
+    let exportTurns = readTranscript(path: exportPath).messages
+    let doc = markdownExport(exportTurns, exported)
+    let docLines = doc.split(separator: "\n", omittingEmptySubsequences: false)
+
+    assert(doc.hasPrefix("# how do I port this\n"), "the title is the document's opening heading")
+    // Not "the file's only heading": a message can carry its own `#`, and keeps it.
+    // What the export guarantees is that nothing it writes itself is a heading, so a
+    // speaker is never mistaken for the conversation's own structure.
+    assert(doc.contains("\n# Порт\n"), "a message's own top-level heading survives unedited")
+    assert(!docLines.contains { $0.hasPrefix("#") && $0.contains("**") },
+           "no speaker label is written as a heading")
+    assert(doc.contains("*/w/proj · main · 13 Aug 2026 · 4 turns*"), "the header's facts, in order")
+    assert(exported.count == 4 && exportTurns.count == 4,
+           "the file and the app must not disagree about how big the conversation was")
+
+    assert(docLines.filter { $0 == "---" }.count == exportTurns.count, "one rule per turn")
+    assert(doc.contains("**You**") && doc.contains("**Claude**"))
+    assert(doc.contains("**pm-analyzer** (another Claude session)\n\nthe schema moved"),
+           "a relayed turn is attributed to the session that sent it, not to the person")
+    assert(!doc.contains("cross-session-message"), "the relay wrapper is machinery, not conversation")
+
+    assert(doc.contains("## The approach"), "a heading inside a message survives as a heading")
+    assert(doc.contains("```swift\nlet x = 1\n```"), "a code fence crosses unaltered")
+    assert(exportTurns.allSatisfy { doc.contains($0.text) },
+           "every turn in full: no term, day, or repo filter reaches the export")
+
+    // A conversation the app knows less about: no working directory, no branch. The
+    // header must lose those facts rather than print a placeholder or a gap.
+    let sparse = markdownExport(readTranscript(path: statsPath).messages,
+                                parseSession(path: statsPath)!)
+    assert(!sparse.contains(unknownProject) && !sparse.contains(" ·  · "),
+           "a fact the app does not have leaves no placeholder and no empty slot")
+    assert(sparse.contains("2 turns"), "what it does know is still there")
+
+    // Filenames: recognisable first, valid always.
+    assert(exportFilename("Port the parser") == "Port the parser")
+    assert(exportFilename("fix a/b:c\nnow") == "fix a b c now", "no separator, colon, or newline")
+    assert(exportFilename(String(repeating: "x", count: 200)).count == maxExportNameLength,
+           "capped before the extension is added")
+    assert(exportFilename("   ") == fallbackExportName && exportFilename("/:/") == fallbackExportName,
+           "a title with nothing usable in it still exports")
+    assert(exportFilename("one   two") == "one two", "runs of whitespace collapse")
+
     // --- incremental rescans ---
     // The one thing that needs scanAll itself: it reuses a cached parse when the
     // file's mtime is unchanged, and must not when it changed. `projectsDir` is a

@@ -9,6 +9,10 @@ let projectsDir: String = ProcessInfo.processInfo.environment["DEJAVU_PROJECTS_D
 let weeks = 4
 let windowSeconds = Double(weeks * 7 * 24 * 3600)
 
+/// Stands in for a session whose log never recorded a working directory. It is a
+/// placeholder, not a path: anything presenting a project has to know that.
+let unknownProject = "(unknown)"
+
 struct Session: Identifiable, Hashable {
     let id: String
     let path: String
@@ -295,7 +299,7 @@ func parseSession(path: String) -> Session? {
         id: (path as NSString).lastPathComponent.replacingOccurrences(of: ".jsonl", with: ""),
         path: path,
         title: titled(customTitle, fallbackTitle),
-        project: cwd ?? "(unknown)",
+        project: cwd ?? unknownProject,
         branch: branch,
         first: firstTS ?? last,
         last: last,
@@ -456,7 +460,7 @@ func readTranscript(path: String) -> Transcript {
         .map { (name: $0.key, count: $0.value) }
     stats.span = (last ?? 0) - (first ?? 0)
     return Transcript(title: titled(customTitle, fallbackTitle),
-                      project: project ?? "(unknown)", messages: mergeRuns(messages),
+                      project: project ?? unknownProject, messages: mergeRuns(messages),
                       stats: stats)
 }
 

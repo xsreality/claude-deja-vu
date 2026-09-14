@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct DejaVuApp: App {
     @State private var store = Store()
@@ -675,6 +676,10 @@ struct TranscriptView: View {
     let store: Store
     let onOpen: (Session.ID) -> Void
     @State private var messages: [RenderedMessage] = []
+    /// The same turns before they were prepared for display, which is what the
+    /// export writes. Not a second copy of the text: these share storage with the
+    /// rendered ones, and keeping them saves re-reading the file to export it.
+    @State private var turns: [Message] = []
     @State private var stats = Stats()
     @State private var copied = false
     /// Which session the messages on screen belong to, so a reload can tell a
@@ -758,17 +763,20 @@ struct TranscriptView: View {
                 // Blanking on a live append would flash the pane and lose the
                 // scroll position; only a different conversation earns that.
                 messages = []
+                turns = []
                 stats = Stats()
             }
             let path = session.path
-            let result = await Task.detached(priority: .userInitiated) { () -> ([RenderedMessage], Stats) in
+            let result = await Task.detached(priority: .userInitiated) {
+                () -> ([RenderedMessage], [Message], Stats) in
                 let t = readTranscript(path: path)
                 return (t.messages.map {
                     RenderedMessage(id: $0.id, role: $0.role, ts: $0.ts,
                                     text: $0.text, blocks: parseBlocks($0.text), from: $0.from)
-                }, t.stats)
+                }, t.messages, t.stats)
             }.value
-            stats = result.1
+            turns = result.1
+            stats = result.2
             // Tracing a peer needs the scanned session list, which lives out here.
             messages = result.0.map { m in
                 guard let peer = m.from else { return m }
@@ -796,6 +804,13 @@ struct TranscriptView: View {
                 StatsLine(stats: stats, session: session)
             }
             Spacer(minLength: 0)
+            Button(action: export) {
+                Label("Export", systemImage: "square.and.arrow.up")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .disabled(turns.isEmpty)
+            .help("Save this conversation as a markdown file")
             Button {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(resume, forType: .string)
@@ -810,6 +825,27 @@ struct TranscriptView: View {
         }
         .padding(.horizontal, 26)
         .padding(.vertical, 14)
+    }
+
+    /// Write the whole conversation out as markdown, wherever the person says.
+    ///
+    /// AppKit's panel rather than SwiftUI's `.fileExporter`, which wants a
+    /// `FileDocument` type, a `UTType`, and an init-from-data path that could never
+    /// run, to do what six lines do here. Modal, so it blocks the run loop while it
+    /// is up, which is what a save panel is supposed to do.
+    private func export() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = exportFilename(session.title) + ".md"
+        if let md = UTType(filenameExtension: "md") { panel.allowedContentTypes = [md] }
+        // Dismissing is an answer, not a failure: nothing written, nothing said.
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try markdownExport(turns, session).write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            // Where the cross-reference already reports its failures, so there is
+            // one place to look and no new alert to dismiss.
+            store.status = "Couldn’t export: \(error.localizedDescription)"
+        }
     }
 
     /// Open a search result on the match, not at the top.

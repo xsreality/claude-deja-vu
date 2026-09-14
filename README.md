@@ -21,6 +21,7 @@ If you run Claude Code across many terminals and repos, related discussions end 
 - **See what a conversation was made of.** Each transcript header carries the model, how long it ran, how many turns it took, the files and tools it touched, and what it cost in dollars and in lines of code changed. Hover it for the rest: the skills the conversation invoked, the subagents it sent out, and the tools it leaned on most.
 - **Follow along live.** The open transcript updates as the conversation continues in your terminal.
 - **Resume where you left off.** One click copies the `cd … && claude --resume …` command for the conversation you're reading.
+- **Take a conversation with you.** **Export** writes the open conversation to a markdown file, headed with the project, branch, date and turn count so it still makes sense a month later. Code blocks and tables survive, so it reads properly pasted into an issue or a doc.
 - **Group related work (optional).** *Cross-reference* asks Claude to read your recent conversations and group them into topics. Topics span projects, so "auth migration" can pull together conversations from three different repos. Each conversation also gets a one-line summary of what it was actually about.
 
 ![Searching across projects: one term, matches in two different repos](docs/search.png)
