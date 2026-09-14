@@ -53,7 +53,7 @@ func runSelftest() {
     assert(s.title == "how do I port this", "meta/tag messages must not become the title")
     assert(s.project == "/w/proj")
     assert(s.branch == "main")
-    assert(s.count == 3, "got \(s.count): malformed and non-message lines must be skipped")
+    assert(s.count == 2, "got \(s.count): two turns, not the three records they came on")
     assert(s.files == ["/w/proj/Store.swift"])
     assert(s.blob.contains("how do I port this") && s.blob.contains("like so"))
     assert(s.last > s.first)
@@ -61,9 +61,11 @@ func runSelftest() {
     let t = readTranscript(path: path)
     assert(t.title == "how do I port this")
     assert(t.project == "/w/proj")
-    // Three messages survive the read, but the two user ones are consecutive and
-    // merge into a single turn, but parseSession still counts the raw 3 above.
+    // Three messages survive the read, and the two user ones are consecutive, so
+    // they merge into a single turn.
     assert(t.messages.count == 2)
+    assert(s.count == t.messages.count,
+           "the list's count and the transcript's turns are the same number, counted twice")
     assert(t.messages[0].role == "user")
     assert(t.messages[0].text.contains("<meta>") && t.messages[0].text.contains("how do I port this"))
     assert(t.messages.last!.text.contains("like so"))
@@ -407,6 +409,10 @@ func runSelftest() {
         // is the unreadable record that must stay counted rather than vanish. Kept at
         // 10:20:00 so the span assertion below still measures the same 20 minutes.
         #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"grilling"}},{"type":"tool_use","name":"Agent","input":{"subagent_type":"Explore"}},{"type":"tool_use","name":"Agent","input":{"subagent_type":"Explore"}},{"type":"tool_use","name":"Skill","input":{"skill":"domain-modeling"}},{"type":"tool_use","name":"Skill","input":{"skill":""}},{"type":"tool_use","name":"mcp__claude_ai_Figma__get_design_context","input":{}}]},"timestamp":"2026-08-13T10:20:00.000Z"}"#,
+        // What the CLI totals up for itself. Cumulative, so a later one supersedes
+        // an earlier one rather than adding to it; the stale figures come first here.
+        #"{"type":"cost-state","totalCostUSD":0.5,"totalToolDuration":1000,"totalLinesAdded":1,"totalLinesRemoved":0}"#,
+        #"{"type":"cost-state","totalCostUSD":17.366810499999993,"totalToolDuration":774003,"totalLinesAdded":120,"totalLinesRemoved":8}"#,
     ])
     let st = readTranscript(path: statsPath).stats
     assert(st.models == ["claude-opus-5", "claude-haiku-4-5-20251001"], "first-seen order, no repeats")
@@ -423,11 +429,26 @@ func runSelftest() {
     assert(tallyText(st.skills) == "grilling, domain-modeling", "no count where one ran once")
     assert(tallyText(st.agents) == "Explore \u{00D7}2", "a count only where one repeated")
 
+    // What the run actually cost, taken from the log rather than recomputed.
+    let cost = st.cost!
+    assert(cost.linesAdded == 120 && cost.linesRemoved == 8, "the last record wins, not the sum")
+    assert(cost.toolSeconds == 774.003, "milliseconds in the log, seconds in the app")
+    assert(money(cost.usd) == "$17.37" && money(0.4) == "$0.40", "cents, never rounded away")
+    assert(readTranscript(path: statsPath).stats.cost != nil)
+    assert(readTranscript(path: empty).stats.cost == nil, "no record, no made-up number")
+
     // The hover card's rows: order, and nothing empty shown.
     let statsSession = parseSession(path: statsPath)!
+    assert(statsSession.count == 2, "a cost-state record is accounting, not a turn")
     let rows = statsRows(st, statsSession)
-    assert(rows.map(\.label) == ["Models", "Tokens", "Skills", "Agents", "Tools"],
-           "skills and agents sit above the tools, and no peers row without peers")
+    assert(rows.map(\.label) == ["Models", "Tokens", "Cost", "Changed", "Skills", "Agents", "Tools"],
+           "cost sits under the tokens it prices; skills and agents above the tools")
+    assert(rows.first { $0.label == "Cost" }!.value == "$17.37 total, 12m running tools")
+    assert(rows.first { $0.label == "Changed" }!.value == "+120 / -8 lines")
+    var free = st
+    free.cost = Cost(usd: 0, linesAdded: 0, linesRemoved: 0, toolSeconds: 0)
+    assert(!statsRows(free, statsSession).contains { $0.label == "Cost" || $0.label == "Changed" },
+           "a zeroed cost record says nothing worth a row")
     assert(rows.first { $0.label == "Skills" }!.value == "grilling, domain-modeling")
     assert(rows.first { $0.label == "Tools" }!.value.hasPrefix("Bash 2, Edit 1"),
            "counts kept, MCP names shortened")
@@ -461,8 +482,13 @@ func runSelftest() {
     setenv("DEJAVU_PROJECTS_DIR", live, 1)
     let stamp = ISO8601DateFormatter().string(from: Date())
     let livePath = live + "/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl"
+    // Speakers alternate so each append is a turn of its own. Three messages from
+    // the same side are one turn, which would make the counts below say nothing.
+    var appended = 0
     func append(_ text: String) {
-        let line = #"{"type":"user","message":{"role":"user","content":"\#(text)"},"timestamp":"\#(stamp)"}"#
+        let role = appended.isMultiple(of: 2) ? "user" : "assistant"
+        appended += 1
+        let line = #"{"type":"\#(role)","message":{"role":"\#(role)","content":"\#(text)"},"timestamp":"\#(stamp)"}"#
         let old = (try? String(contentsOfFile: livePath, encoding: .utf8)).map { $0 + "\n" } ?? ""
         try! (old + line).write(toFile: livePath, atomically: true, encoding: .utf8)
     }

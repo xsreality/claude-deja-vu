@@ -609,6 +609,12 @@ func compact(_ n: Int) -> String {
     }
 }
 
+/// "$17.37". Cents always, because a 40-cent conversation and a 40-dollar one
+/// have to look different at a glance, and "$0" for the cheap one would lie.
+func money(_ usd: Double) -> String {
+    String(format: "$%.2f", usd)
+}
+
 /// "4h 12m", "35m", "50s": a conversation's wall clock, not a duration to the second.
 func spanLabel(_ seconds: Double) -> String {
     let s = Int(seconds.rounded())
@@ -859,6 +865,12 @@ struct StatsLine: View {
         if stats.input + stats.output > 0 {
             out.append("\(compact(stats.input))↓ \(compact(stats.output))↑")
         }
+        // Money before lines: this line truncates from the right on a narrow window,
+        // and the dollar figure is the one worth keeping.
+        if let c = stats.cost {
+            if c.usd > 0 { out.append(money(c.usd)) }
+            if c.linesAdded + c.linesRemoved > 0 { out.append("+\(c.linesAdded) -\(c.linesRemoved)") }
+        }
         return out
     }
 
@@ -890,6 +902,17 @@ func statsRows(_ stats: Stats, _ session: Session) -> [(label: String, value: St
             + ", \(stats.output.formatted()) out"
         if stats.thinking > 0 { t += ", \(stats.thinking.formatted()) thinking" }
         rows.append(("Tokens", t))
+    }
+    // Under the tokens it is derived from, and worth more than they are: the log
+    // knows the per-model prices, so this is the real number, not an estimate.
+    if let c = stats.cost, c.usd > 0 {
+        // Wall clock is already on the line above. What it does not say is how
+        // little of those hours was work, which is the interesting half.
+        rows.append(("Cost", "\(money(c.usd)) total"
+            + (c.toolSeconds >= 1 ? ", \(spanLabel(c.toolSeconds)) running tools" : "")))
+    }
+    if let c = stats.cost, c.linesAdded + c.linesRemoved > 0 {
+        rows.append(("Changed", "+\(c.linesAdded.formatted()) / -\(c.linesRemoved.formatted()) lines"))
     }
     // Above the tools, and never truncated: these are what the conversation set
     // out to do, where the tools are how it got there.

@@ -17,6 +17,8 @@ struct Session: Identifiable, Hashable {
     let branch: String?
     let first: Double
     let last: Double
+    /// Turns, not log records: what you would scroll past in the transcript. A
+    /// tool call and its result are part of somebody's turn, not turns of their own.
     let count: Int
     let blob: String
     let files: [String]
@@ -102,12 +104,29 @@ struct Stats {
     var agents: [(name: String, count: Int)] = []
     /// Wall clock from the first message to the last.
     var span: Double = 0
+    /// What the CLI itself totalled up, for the sessions that got far enough to
+    /// write it. Counting tokens ourselves cannot produce this: the price per
+    /// token is not in the log, and a cache read is not billed like a fresh one.
+    var cost: Cost?
 
     /// Everything the conversation invoked. Skills and agents are tool calls too;
     /// listing them separately is presentation, and must not shrink the total.
     var toolCalls: Int {
         [tools, skills, agents].joined().reduce(0) { $0 + $1.count }
     }
+}
+
+/// The `cost-state` record: the CLI's own accounting, written as the session goes.
+///
+/// Worth taking at face value rather than recomputing. It knows the per-model
+/// prices, and it separates time spent waiting on tools from the hours a
+/// conversation merely stayed open.
+struct Cost {
+    var usd: Double = 0
+    var linesAdded = 0
+    var linesRemoved = 0
+    /// Seconds actually spent running tools, which is usually a small share of `span`.
+    var toolSeconds: Double = 0
 }
 
 /// Bump a first-use-ordered tally.
@@ -211,7 +230,11 @@ func parseSession(path: String) -> Session? {
     var branch: String?
     var firstTS: Double?
     var lastTS: Double?
-    var count = 0
+    var records = 0
+    var turns = 0
+    /// Who the last *shown* message was from, so a run of them counts once. Same
+    /// rule `mergeRuns` applies to the transcript, kept without building the strings.
+    var lastSpeaker: String?
     var blobParts: [String] = []
     var files = Set<String>()
     var sawAssistantText = false
@@ -227,10 +250,20 @@ func parseSession(path: String) -> Session? {
 
         let msg = o["message"] as? [String: Any] ?? [:]
         let text = textOf(msg["content"])
+        let peer = parseCrossSession(text)?.peer
         if !text.isEmpty { blobParts.append(text) }
         if type == "assistant", !text.isEmpty { sawAssistantText = true }
-        if let peer = parseCrossSession(text)?.peer { peers.insert(peer.name) }
+        if let peer { peers.insert(peer.name) }
         files.formUnion(filesOf(msg["content"]))
+
+        // A tool call and the result it gets back are each their own record, and
+        // neither carries text, so a 452-record session is really a dozen exchanges.
+        // Count what the transcript shows instead, which is the number the list and
+        // the activity strip both mean when they say how big a conversation was.
+        if !text.isEmpty {
+            let speaker = ((msg["role"] as? String) ?? type ?? "user") + (peer?.name ?? "")
+            if speaker != lastSpeaker { turns += 1; lastSpeaker = speaker }
+        }
 
         if let c = o["cwd"] as? String, !c.isEmpty { cwd = c }
         if let b = o["gitBranch"] as? String, !b.isEmpty { branch = b }
@@ -238,7 +271,7 @@ func parseSession(path: String) -> Session? {
             firstTS = firstTS.map { min($0, ep) } ?? ep
             lastTS = lastTS.map { max($0, ep) } ?? ep
         }
-        count += 1
+        records += 1
 
         if type == "user", fallbackTitle == nil,
            isRealUserText(text, isMeta: o["isMeta"] as? Bool ?? false) {
@@ -246,7 +279,7 @@ func parseSession(path: String) -> Session? {
         }
     }
 
-    guard count > 0, let last = lastTS else { return nil }
+    guard records > 0, let last = lastTS else { return nil }
 
     // Nothing but slash commands (`/model`, `/clear`) leaves a session with no
     // prose from you and no reply from Claude. That is not a conversation, so it
@@ -266,7 +299,7 @@ func parseSession(path: String) -> Session? {
         branch: branch,
         first: firstTS ?? last,
         last: last,
-        count: count,
+        count: turns,
         blob: blob,
         files: files.sorted(),
         peers: peers.sorted(),
@@ -351,6 +384,17 @@ func readTranscript(path: String) -> Transcript {
         let type = o["type"] as? String
         if type == "custom-title" {
             customTitle = (o["customTitle"] as? String) ?? customTitle
+            continue
+        }
+        // Written as the session goes and cumulative each time, so the last one
+        // wins rather than the numbers being added up.
+        if type == "cost-state" {
+            stats.cost = Cost(
+                usd: o["totalCostUSD"] as? Double ?? 0,
+                linesAdded: o["totalLinesAdded"] as? Int ?? 0,
+                linesRemoved: o["totalLinesRemoved"] as? Int ?? 0,
+                // Milliseconds in the log; seconds everywhere in this app.
+                toolSeconds: (o["totalToolDuration"] as? Double ?? 0) / 1000)
             continue
         }
         guard type == "user" || type == "assistant" else { continue }
