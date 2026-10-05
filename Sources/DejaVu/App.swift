@@ -25,6 +25,8 @@ struct ContentView: View {
     @State private var selection: Session.ID? =
         ProcessInfo.processInfo.environment["DEJAVU_SELECT"]
     @FocusState private var searchFocused: Bool
+    // AppKit autosaves a collapsed list and restores it, which opens the app looking empty.
+    @State private var columns = NavigationSplitViewVisibility.all
 
     var body: some View {
         VStack(spacing: 0) {
@@ -116,7 +118,7 @@ struct ContentView: View {
     }
 
     private var splitView: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columns) {
             VStack(spacing: 0) {
                 Text(countLabel)
                     .font(.system(size: 12))
