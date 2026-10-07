@@ -53,7 +53,7 @@ func runSelftest() {
     assert(s.title == "how do I port this", "meta/tag messages must not become the title")
     assert(s.project == "/w/proj")
     assert(s.branch == "main")
-    assert(s.count == 3, "got \(s.count): malformed and non-message lines must be skipped")
+    assert(s.count == 2, "got \(s.count): two turns, not the three records they came on")
     assert(s.files == ["/w/proj/Store.swift"])
     assert(s.blob.contains("how do I port this") && s.blob.contains("like so"))
     assert(s.last > s.first)
@@ -61,9 +61,11 @@ func runSelftest() {
     let t = readTranscript(path: path)
     assert(t.title == "how do I port this")
     assert(t.project == "/w/proj")
-    // Three messages survive the read, but the two user ones are consecutive and
-    // merge into a single turn, but parseSession still counts the raw 3 above.
+    // Three messages survive the read, and the two user ones are consecutive, so
+    // they merge into a single turn.
     assert(t.messages.count == 2)
+    assert(s.count == t.messages.count,
+           "the list's count and the transcript's turns are the same number, counted twice")
     assert(t.messages[0].role == "user")
     assert(t.messages[0].text.contains("<meta>") && t.messages[0].text.contains("how do I port this"))
     assert(t.messages.last!.text.contains("like so"))
@@ -403,14 +405,62 @@ func runSelftest() {
         #"{"type":"user","message":{"role":"user","content":"go"},"timestamp":"2026-08-13T10:00:00.000Z"}"#,
         #"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"on it"}],"usage":{"input_tokens":10,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000,"output_tokens":7,"output_tokens_details":{"thinking_tokens":3}}},"timestamp":"2026-08-13T10:00:30.000Z"}"#,
         #"{"type":"assistant","message":{"role":"assistant","model":"claude-haiku-4-5-20251001","content":[{"type":"tool_use","name":"Bash","input":{}},{"type":"tool_use","name":"Bash","input":{}},{"type":"tool_use","name":"Edit","input":{"file_path":"/w/a.swift"}}],"usage":{"input_tokens":1,"output_tokens":2}},"timestamp":"2026-08-13T10:20:00.000Z"}"#,
+        // Skills and agents: named one level down, in the input. The empty skill name
+        // is the unreadable record that must stay counted rather than vanish. Kept at
+        // 10:20:00 so the span assertion below still measures the same 20 minutes.
+        #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"grilling"}},{"type":"tool_use","name":"Agent","input":{"subagent_type":"Explore"}},{"type":"tool_use","name":"Agent","input":{"subagent_type":"Explore"}},{"type":"tool_use","name":"Skill","input":{"skill":"domain-modeling"}},{"type":"tool_use","name":"Skill","input":{"skill":""}},{"type":"tool_use","name":"mcp__claude_ai_Figma__get_design_context","input":{}}]},"timestamp":"2026-08-13T10:20:00.000Z"}"#,
+        // What the CLI totals up for itself. Cumulative, so a later one supersedes
+        // an earlier one rather than adding to it; the stale figures come first here.
+        #"{"type":"cost-state","totalCostUSD":0.5,"totalToolDuration":1000,"totalLinesAdded":1,"totalLinesRemoved":0}"#,
+        #"{"type":"cost-state","totalCostUSD":17.366810499999993,"totalToolDuration":774003,"totalLinesAdded":120,"totalLinesRemoved":8}"#,
     ])
     let st = readTranscript(path: statsPath).stats
     assert(st.models == ["claude-opus-5", "claude-haiku-4-5-20251001"], "first-seen order, no repeats")
     assert(st.input == 1111, "fresh + cache creation + cache read")
     assert(st.output == 9 && st.thinking == 3)
-    assert(st.tools.map(\.name) == ["Bash", "Edit"], "most used first")
+    assert(st.tools.map(\.name)
+        == ["Bash", "Edit", "Skill", "mcp__claude_ai_Figma__get_design_context"],
+        "most used first; a skill with no name falls back to the mechanism")
     assert(st.tools.first!.count == 2)
-    assert(st.toolCalls == 3)
+    assert(st.skills.map(\.name) == ["grilling", "domain-modeling"], "first-use order")
+    assert(st.skills.allSatisfy { $0.count == 1 })
+    assert(st.agents.map(\.name) == ["Explore"] && st.agents.first!.count == 2)
+    assert(st.toolCalls == 9, "tools + skills + agents: the total must not shrink")
+    assert(tallyText(st.skills) == "grilling, domain-modeling", "no count where one ran once")
+    assert(tallyText(st.agents) == "Explore \u{00D7}2", "a count only where one repeated")
+
+    // What the run actually cost, taken from the log rather than recomputed.
+    let cost = st.cost!
+    assert(cost.linesAdded == 120 && cost.linesRemoved == 8, "the last record wins, not the sum")
+    assert(cost.toolSeconds == 774.003, "milliseconds in the log, seconds in the app")
+    assert(money(cost.usd) == "$17.37" && money(0.4) == "$0.40", "cents, never rounded away")
+    assert(readTranscript(path: statsPath).stats.cost != nil)
+    assert(readTranscript(path: empty).stats.cost == nil, "no record, no made-up number")
+
+    // The hover card's rows: order, and nothing empty shown.
+    let statsSession = parseSession(path: statsPath)!
+    assert(statsSession.count == 2, "a cost-state record is accounting, not a turn")
+    let rows = statsRows(st, statsSession)
+    assert(rows.map(\.label) == ["Models", "Tokens", "Cost", "Changed", "Skills", "Agents", "Tools"],
+           "cost sits under the tokens it prices; skills and agents above the tools")
+    assert(rows.first { $0.label == "Cost" }!.value == "$17.37 total, 12m running tools")
+    assert(rows.first { $0.label == "Changed" }!.value == "+120 / -8 lines")
+    var free = st
+    free.cost = Cost(usd: 0, linesAdded: 0, linesRemoved: 0, toolSeconds: 0)
+    assert(!statsRows(free, statsSession).contains { $0.label == "Cost" || $0.label == "Changed" },
+           "a zeroed cost record says nothing worth a row")
+    assert(rows.first { $0.label == "Skills" }!.value == "grilling, domain-modeling")
+    assert(rows.first { $0.label == "Tools" }!.value.hasPrefix("Bash 2, Edit 1"),
+           "counts kept, MCP names shortened")
+    assert(rows.first { $0.label == "Tools" }!.value.contains("Figma:get_design_context"))
+    assert(statsRows(Stats(), statsSession).isEmpty, "no stats, no card")
+
+    // Display-only shortening: never merges two tools, never touches a plain name.
+    assert(shortTool("mcp__claude_ai_Figma__get_design_context") == "Figma:get_design_context")
+    assert(shortTool("mcp__sonarqube__show_rule") == "sonarqube:show_rule")
+    assert(shortTool("Bash") == "Bash" && shortTool("AskUserQuestion") == "AskUserQuestion")
+    assert(shortTool("mcp__only_server") == "mcp__only_server", "not an MCP shape")
+    assert(shortTool("mcp__srv__a__b") == "srv:a__b", "only the first split is the server")
     assert(st.span == 1200, "20 minutes from first message to last")
     assert(readTranscript(path: statsPath).messages.count == 2, "the tool-only turn has no text to show")
     assert(readTranscript(path: empty).stats.models.isEmpty, "an empty file has no stats")
@@ -423,6 +473,60 @@ func runSelftest() {
     assert(shortModel("claude-haiku-4-5-20251001") == "haiku-4-5", "the date stamp is noise")
     assert(shortModel("some-other-model") == "some-other-model")
 
+    // --- exporting a conversation ---
+    // Everything the spec names in one fixture: ordinary turns both ways, a turn
+    // relayed from another session, and a turn carrying its own heading and a
+    // fenced code block, which is what the separator choice has to survive.
+    let exportPath = write("export.jsonl", [
+        #"{"type":"user","message":{"role":"user","content":"how do I port this"},"cwd":"/w/proj","gitBranch":"main","timestamp":"2026-08-13T10:00:00.000Z"}"#,
+        #"{"type":"assistant","message":{"role":"assistant","content":"Like so.\n\n# Порт\n\n## The approach\n\n```swift\nlet x = 1\n```"},"timestamp":"2026-08-13T10:01:00.000Z"}"#,
+        #"{"type":"user","message":{"role":"user","content":"Another Claude session sent a message:\n<cross-session-message from=\"uds:/x.sock\" from-name=\"pm-analyzer\">the schema moved</cross-session-message>"},"timestamp":"2026-08-13T10:02:00.000Z"}"#,
+        #"{"type":"user","message":{"role":"user","content":"thanks"},"timestamp":"2026-08-13T10:03:00.000Z"}"#,
+    ])
+    let exported = parseSession(path: exportPath)!
+    let exportTurns = readTranscript(path: exportPath).messages
+    let doc = markdownExport(exportTurns, exported)
+    let docLines = doc.split(separator: "\n", omittingEmptySubsequences: false)
+
+    assert(doc.hasPrefix("# how do I port this\n"), "the title is the document's opening heading")
+    // Not "the file's only heading": a message can carry its own `#`, and keeps it.
+    // What the export guarantees is that nothing it writes itself is a heading, so a
+    // speaker is never mistaken for the conversation's own structure.
+    assert(doc.contains("\n# Порт\n"), "a message's own top-level heading survives unedited")
+    assert(!docLines.contains { $0.hasPrefix("#") && $0.contains("**") },
+           "no speaker label is written as a heading")
+    assert(doc.contains("*/w/proj · main · 13 Aug 2026 · 4 turns*"), "the header's facts, in order")
+    assert(exported.count == 4 && exportTurns.count == 4,
+           "the file and the app must not disagree about how big the conversation was")
+
+    assert(docLines.filter { $0 == "---" }.count == exportTurns.count, "one rule per turn")
+    assert(doc.contains("**You**") && doc.contains("**Claude**"))
+    assert(doc.contains("**pm-analyzer** (another Claude session)\n\nthe schema moved"),
+           "a relayed turn is attributed to the session that sent it, not to the person")
+    assert(!doc.contains("cross-session-message"), "the relay wrapper is machinery, not conversation")
+
+    assert(doc.contains("## The approach"), "a heading inside a message survives as a heading")
+    assert(doc.contains("```swift\nlet x = 1\n```"), "a code fence crosses unaltered")
+    assert(exportTurns.allSatisfy { doc.contains($0.text) },
+           "every turn in full: no term, day, or repo filter reaches the export")
+
+    // A conversation the app knows less about: no working directory, no branch. The
+    // header must lose those facts rather than print a placeholder or a gap.
+    let sparse = markdownExport(readTranscript(path: statsPath).messages,
+                                parseSession(path: statsPath)!)
+    assert(!sparse.contains(unknownProject) && !sparse.contains(" ·  · "),
+           "a fact the app does not have leaves no placeholder and no empty slot")
+    assert(sparse.contains("2 turns"), "what it does know is still there")
+
+    // Filenames: recognisable first, valid always.
+    assert(exportFilename("Port the parser") == "Port the parser")
+    assert(exportFilename("fix a/b:c\nnow") == "fix a b c now", "no separator, colon, or newline")
+    assert(exportFilename(String(repeating: "x", count: 200)).count == maxExportNameLength,
+           "capped before the extension is added")
+    assert(exportFilename("   ") == fallbackExportName && exportFilename("/:/") == fallbackExportName,
+           "a title with nothing usable in it still exports")
+    assert(exportFilename("one   two") == "one two", "runs of whitespace collapse")
+
     // --- incremental rescans ---
     // The one thing that needs scanAll itself: it reuses a cached parse when the
     // file's mtime is unchanged, and must not when it changed. `projectsDir` is a
@@ -432,8 +536,13 @@ func runSelftest() {
     setenv("DEJAVU_PROJECTS_DIR", live, 1)
     let stamp = ISO8601DateFormatter().string(from: Date())
     let livePath = live + "/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl"
+    // Speakers alternate so each append is a turn of its own. Three messages from
+    // the same side are one turn, which would make the counts below say nothing.
+    var appended = 0
     func append(_ text: String) {
-        let line = #"{"type":"user","message":{"role":"user","content":"\#(text)"},"timestamp":"\#(stamp)"}"#
+        let role = appended.isMultiple(of: 2) ? "user" : "assistant"
+        appended += 1
+        let line = #"{"type":"\#(role)","message":{"role":"\#(role)","content":"\#(text)"},"timestamp":"\#(stamp)"}"#
         let old = (try? String(contentsOfFile: livePath, encoding: .utf8)).map { $0 + "\n" } ?? ""
         try! (old + line).write(toFile: livePath, atomically: true, encoding: .utf8)
     }

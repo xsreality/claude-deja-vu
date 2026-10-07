@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct DejaVuApp: App {
     @State private var store = Store()
@@ -335,12 +336,20 @@ struct DayTooltip: View {
                 .opacity(0.92)
             }
         }
-        .foregroundStyle(Color(white: 0.98))
-        .padding(.horizontal, 13)
-        .padding(.vertical, 10)
-        .background(Color(red: 0.09, green: 0.086, blue: 0.082),
-                    in: RoundedRectangle(cornerRadius: 8))
-        .shadow(color: .black.opacity(0.28), radius: 15, y: 12)
+        .tooltipCard()
+    }
+}
+
+extension View {
+    /// The app's hover card: near-black in both appearances, like the web
+    /// version's #tip. Shared so a second tooltip cannot drift into a second look.
+    func tooltipCard() -> some View {
+        foregroundStyle(Color(white: 0.98))
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
+            .background(Color(red: 0.09, green: 0.086, blue: 0.082),
+                        in: RoundedRectangle(cornerRadius: 8))
+            .shadow(color: .black.opacity(0.28), radius: 15, y: 12)
     }
 }
 
@@ -603,6 +612,12 @@ func compact(_ n: Int) -> String {
     }
 }
 
+/// "$17.37". Cents always, because a 40-cent conversation and a 40-dollar one
+/// have to look different at a glance, and "$0" for the cheap one would lie.
+func money(_ usd: Double) -> String {
+    String(format: "$%.2f", usd)
+}
+
 /// "4h 12m", "35m", "50s": a conversation's wall clock, not a duration to the second.
 func spanLabel(_ seconds: Double) -> String {
     let s = Int(seconds.rounded())
@@ -620,6 +635,24 @@ func shortModel(_ id: String) -> String {
         return parts.dropLast().joined(separator: "-")
     }
     return name
+}
+
+/// `mcp__claude_ai_Figma__get_design_context` -> `Figma:get_design_context`.
+///
+/// An MCP tool name spends most of its width on plumbing, and a handful of them
+/// crowd everything else out of the six that fit. Display only: the counts are
+/// keyed on the recorded name, so two tools from one server stay two entries.
+/// Anything not shaped like an MCP name is left exactly as recorded.
+func shortTool(_ name: String) -> String {
+    guard name.hasPrefix("mcp__") else { return name }
+    let parts = name.dropFirst("mcp__".count).components(separatedBy: "__")
+    guard parts.count >= 2 else { return name }
+    // Every connector carries `claude_ai_`, so it distinguishes no server from any
+    // other. The tool keeps any `__` of its own: only the first split is the server.
+    let server = parts[0].hasPrefix("claude_ai_")
+        ? String(parts[0].dropFirst("claude_ai_".count)) : parts[0]
+    let tool = parts.dropFirst().joined(separator: "__")
+    return server.isEmpty || tool.isEmpty ? name : "\(server):\(tool)"
 }
 
 // --- transcript --------------------------------------------------------------
@@ -645,6 +678,10 @@ struct TranscriptView: View {
     let store: Store
     let onOpen: (Session.ID) -> Void
     @State private var messages: [RenderedMessage] = []
+    /// The same turns before they were prepared for display, which is what the
+    /// export writes. Not a second copy of the text: these share storage with the
+    /// rendered ones, and keeping them saves re-reading the file to export it.
+    @State private var turns: [Message] = []
     @State private var stats = Stats()
     @State private var copied = false
     /// Which session the messages on screen belong to, so a reload can tell a
@@ -706,6 +743,18 @@ struct TranscriptView: View {
                 }
             }
         }
+        // Drawn out here rather than in the header, so it lands above the transcript.
+        .overlayPreferenceValue(StatsTipAnchor.self) { anchor in
+            if let anchor {
+                GeometryReader { geo in
+                    StatsTooltip(rows: statsRows(stats, session))
+                        .frame(width: tipWidth)
+                        .offset(x: geo[anchor].minX, y: geo[anchor].maxY + 6)
+                }
+                .allowsHitTesting(false)
+                .transaction { $0.animation = nil }
+            }
+        }
         // Reloads when you pick another conversation, and again whenever this one
         // grows: the watcher hands us a new Session with a higher count, which
         // would otherwise sit in the list while the open transcript went stale.
@@ -716,17 +765,20 @@ struct TranscriptView: View {
                 // Blanking on a live append would flash the pane and lose the
                 // scroll position; only a different conversation earns that.
                 messages = []
+                turns = []
                 stats = Stats()
             }
             let path = session.path
-            let result = await Task.detached(priority: .userInitiated) { () -> ([RenderedMessage], Stats) in
+            let result = await Task.detached(priority: .userInitiated) {
+                () -> ([RenderedMessage], [Message], Stats) in
                 let t = readTranscript(path: path)
                 return (t.messages.map {
                     RenderedMessage(id: $0.id, role: $0.role, ts: $0.ts,
                                     text: $0.text, blocks: parseBlocks($0.text), from: $0.from)
-                }, t.stats)
+                }, t.messages, t.stats)
             }.value
-            stats = result.1
+            turns = result.1
+            stats = result.2
             // Tracing a peer needs the scanned session list, which lives out here.
             messages = result.0.map { m in
                 guard let peer = m.from else { return m }
@@ -754,6 +806,13 @@ struct TranscriptView: View {
                 StatsLine(stats: stats, session: session)
             }
             Spacer(minLength: 0)
+            Button(action: export) {
+                Label("Export", systemImage: "square.and.arrow.up")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .disabled(turns.isEmpty)
+            .help("Save this conversation as a markdown file")
             Button {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(resume, forType: .string)
@@ -768,6 +827,27 @@ struct TranscriptView: View {
         }
         .padding(.horizontal, 26)
         .padding(.vertical, 14)
+    }
+
+    /// Write the whole conversation out as markdown, wherever the person says.
+    ///
+    /// AppKit's panel rather than SwiftUI's `.fileExporter`, which wants a
+    /// `FileDocument` type, a `UTType`, and an init-from-data path that could never
+    /// run, to do what six lines do here. Modal, so it blocks the run loop while it
+    /// is up, which is what a save panel is supposed to do.
+    private func export() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = exportFilename(session.title) + ".md"
+        if let md = UTType(filenameExtension: "md") { panel.allowedContentTypes = [md] }
+        // Dismissing is an answer, not a failure: nothing written, nothing said.
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try markdownExport(turns, session).write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            // Where the cross-reference already reports its failures, so there is
+            // one place to look and no new alert to dismiss.
+            store.status = "Couldn’t export: \(error.localizedDescription)"
+        }
     }
 
     /// Open a search result on the match, not at the top.
@@ -786,6 +866,8 @@ struct StatsLine: View {
     let stats: Stats
     let session: Session
 
+    @State private var hovering = false
+
     var body: some View {
         if !parts.isEmpty {
             Text(parts.joined(separator: "  ·  "))
@@ -793,8 +875,18 @@ struct StatsLine: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .help(detail)
                 .padding(.top, 2)
+                .onHover { hovering = $0 }
+                // Own card rather than .help(), for the reason the activity strip
+                // already gave: the native tooltip is unstyleable and waits a second.
+                //
+                // The card cannot be an overlay here. The transcript is drawn after
+                // the header and covers it, and a .zIndex on the header to win that
+                // ordering leaves the ScrollView blank. So this only reports where
+                // the line is, and the pane draws the card above all of its children.
+                .anchorPreference(key: StatsTipAnchor.self, value: .bounds) {
+                    hovering && !statsRows(stats, session).isEmpty ? $0 : nil
+                }
         }
     }
 
@@ -811,33 +903,99 @@ struct StatsLine: View {
         if stats.input + stats.output > 0 {
             out.append("\(compact(stats.input))↓ \(compact(stats.output))↑")
         }
+        // Money before lines: this line truncates from the right on a narrow window,
+        // and the dollar figure is the one worth keeping.
+        if let c = stats.cost {
+            if c.usd > 0 { out.append(money(c.usd)) }
+            if c.linesAdded + c.linesRemoved > 0 { out.append("+\(c.linesAdded) -\(c.linesRemoved)") }
+        }
         return out
     }
 
-    /// Spelled out, with the numbers the one-liner rounds off.
-    private var detail: String {
-        var lines: [String] = []
-        if !stats.models.isEmpty {
-            lines.append("Models: " + stats.models.map(shortModel).joined(separator: ", "))
-        }
-        if stats.input + stats.output > 0 {
-            // "in" is everything sent, cache reads included, which is what the log
-            // records and what the context actually cost to carry.
-            var t = "Tokens: \(stats.input.formatted()) in (cache included)"
-                + ", \(stats.output.formatted()) out"
-            if stats.thinking > 0 { t += ", \(stats.thinking.formatted()) thinking" }
-            lines.append(t)
-        }
-        if !stats.tools.isEmpty {
-            let top = stats.tools.prefix(6).map { "\($0.name) \($0.count)" }
-            lines.append("Tools: " + top.joined(separator: ", ")
-                + (stats.tools.count > 6 ? ", +\(stats.tools.count - 6) more" : ""))
-        }
-        if !session.peers.isEmpty {
-            lines.append("Messaged by: " + session.peers.joined(separator: ", "))
-        }
-        return lines.joined(separator: "\n")
+}
+
+private let tipWidth: CGFloat = 380
+
+/// Where the stats line is, published only while it is hovered.
+struct StatsTipAnchor: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
     }
+}
+
+/// The breakdown, spelled out with the numbers the one-liner rounds off.
+///
+/// A free function rather than a property on the view, so the selftest can read
+/// it: a View's private computed property cannot be asserted.
+func statsRows(_ stats: Stats, _ session: Session) -> [(label: String, value: String)] {
+    var rows: [(label: String, value: String)] = []
+    if !stats.models.isEmpty {
+        rows.append(("Models", stats.models.map(shortModel).joined(separator: ", ")))
+    }
+    if stats.input + stats.output > 0 {
+        // "in" is everything sent, cache reads included, which is what the log
+        // records and what the context actually cost to carry.
+        var t = "\(stats.input.formatted()) in (cache included)"
+            + ", \(stats.output.formatted()) out"
+        if stats.thinking > 0 { t += ", \(stats.thinking.formatted()) thinking" }
+        rows.append(("Tokens", t))
+    }
+    // Under the tokens it is derived from, and worth more than they are: the log
+    // knows the per-model prices, so this is the real number, not an estimate.
+    if let c = stats.cost, c.usd > 0 {
+        // Wall clock is already on the line above. What it does not say is how
+        // little of those hours was work, which is the interesting half.
+        rows.append(("Cost", "\(money(c.usd)) total"
+            + (c.toolSeconds >= 1 ? ", \(spanLabel(c.toolSeconds)) running tools" : "")))
+    }
+    if let c = stats.cost, c.linesAdded + c.linesRemoved > 0 {
+        rows.append(("Changed", "+\(c.linesAdded.formatted()) / -\(c.linesRemoved.formatted()) lines"))
+    }
+    // Above the tools, and never truncated: these are what the conversation set
+    // out to do, where the tools are how it got there.
+    if !stats.skills.isEmpty { rows.append(("Skills", tallyText(stats.skills))) }
+    if !stats.agents.isEmpty { rows.append(("Agents", tallyText(stats.agents))) }
+    if !stats.tools.isEmpty {
+        let top = stats.tools.prefix(6).map { "\(shortTool($0.name)) \($0.count)" }
+        rows.append(("Tools", top.joined(separator: ", ")
+            + (stats.tools.count > 6 ? ", +\(stats.tools.count - 6) more" : "")))
+    }
+    if !session.peers.isEmpty {
+        rows.append(("Messaged by", session.peers.joined(separator: ", ")))
+    }
+    return rows
+}
+
+/// The header's hover card. Same chrome as the strip's, and a fixed label column
+/// so the values line up instead of starting wherever the label happened to end.
+struct StatsTooltip: View {
+    let rows: [(label: String, value: String)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(rows, id: \.label) { row in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(row.label)
+                        .font(.system(size: 12, weight: .semibold))
+                        .opacity(0.62)
+                        .frame(width: 74, alignment: .leading)
+                    Text(row.value)
+                        .font(.system(size: 12.5, design: .monospaced))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .tooltipCard()
+    }
+}
+
+/// `styling`, or `Explore x4` where the same one ran more than once. A column of
+/// x1s on every entry would say nothing.
+func tallyText(_ list: [(name: String, count: Int)]) -> String {
+    list.map { $0.count > 1 ? "\($0.name) \u{00D7}\($0.count)" : $0.name }
+        .joined(separator: ", ")
 }
 
 /// How far past the bottom of the visible area the end of the transcript sits.

@@ -21,6 +21,18 @@ if CommandLine.arguments.contains("--analyze") {
     exit(0)
 }
 
+// The Export button, headless: the same render the button writes to a file, to
+// stdout instead, so it can be checked against real logs without a window.
+if let i = CommandLine.arguments.firstIndex(of: "--export") {
+    let wanted = CommandLine.arguments.count > i + 1 ? CommandLine.arguments[i + 1] : ""
+    guard let s = scanAll().sessions.first(where: { $0.id == wanted }) else {
+        print("usage: DejaVu --export <session-id>   (id must be in the 4-week window)")
+        exit(1)
+    }
+    print(markdownExport(readTranscript(path: s.path).messages, s), terminator: "")
+    exit(0)
+}
+
 // Parity probe against the frozen Python implementation:
 //   swift run DejaVu --dump | diff - <(python3 dashboard.py --dump)
 if let i = CommandLine.arguments.firstIndex(of: "--dump") {
